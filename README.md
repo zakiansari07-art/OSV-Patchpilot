@@ -240,7 +240,7 @@ To enable the example in a target repository:
    - `VULNERABILITY_AGENT_REPOSITORY`: `OWNER/REPOSITORY` for this agent's GitHub repository.
    - `VULNERABILITY_AGENT_COMMIT`: a reviewed, immutable full commit SHA for the agent. Do not use a moving branch name.
 3. Add an Actions secret named `OPENAI_API_KEY`.
-4. Check repository Actions settings and workflow permissions. Evidence needs `contents:read` and `pull-requests:read`; the trusted comment job needs `actions:read`, `contents:read`, and `issues:write`.
+4. Add OPENAI_API_KEY and a fine-grained REVIEW_COMMENT_TOKEN secret. Limit REVIEW_COMMENT_TOKEN to this repository with Issues: Read and write permission. The built-in workflow token only needs actions:read and contents:read; the evidence job needs contents:read and pull-requests:read.
 5. Open or update a Dependabot PR and inspect the workflow run and resulting comment.
 
 The workflow files use version tags for GitHub Actions as readable examples. Before relying on them in a production repository, review and pin each third-party action to a verified immutable commit SHA. The evidence workflow executes dependency installation and tests, so use ephemeral GitHub-hosted runners or another isolated environment.

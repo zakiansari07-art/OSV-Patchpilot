@@ -100,7 +100,11 @@ def test_actions_templates_separate_untrusted_tests_from_write_token_job():
     comment = Path("examples/github-actions/dependabot-review-comment.yml").read_text()
     assert "pull-requests: read" in evidence
     assert "OPENAI_API_KEY" not in evidence
-    assert "issues: write" in comment
+    posting_step = comment.split("- name: Generate and post the PR review", 1)[1]
+    assert "GITHUB_TOKEN: $" + "{{ secrets.REVIEW_COMMENT_TOKEN }}" in posting_step
+    assert "GITHUB_TOKEN: $" + "{{ github.token }}" not in posting_step
+    assert "issues: write" not in comment
+    assert "actions: read" in comment
     assert "workflow_run:" in comment
     assert "actions/download-artifact" in comment
     assert "checkout" not in comment.split("Download evidence from the completed run", 1)[1]
@@ -237,6 +241,24 @@ def test_post_review_comment_creates_one_without_mention_notifications():
     body = github.post.call_args.kwargs["json"]["body"]
     assert "@\u200beveryone" in body
     assert COMMENT_MARKER in body
+
+
+def test_comment_failure_includes_github_api_message():
+    endpoint = "https://api.github.com/repos/acme/demo/issues/4/comments?per_page=100&page=1"
+    response = review.httpx.Response(
+        403,
+        json={"message": "Resource not accessible by integration"},
+        request=review.httpx.Request("GET", endpoint),
+    )
+    github = Mock()
+    github.get.return_value = response
+
+    with pytest.raises(RuntimeError, match="Resource not accessible by integration"):
+        post_idempotent_review_comment(
+            {"repository_full_name": "acme/demo", "pull_request": {"number": 4}},
+            "review body",
+            github_client=github,
+        )
 
 
 def test_review_graph_reports_comment_failure_without_losing_analysis(monkeypatch):
@@ -442,8 +464,11 @@ def test_review_uses_current_base_when_pr_base_is_its_ancestor(tmp_path, monkeyp
                 "refs/agent-review/17/head": "head-sha",
             }[args[1]]
         if args[0] == "merge-base":
-            assert args[1:] == ("api-base", "current-base")
-            return "api-base"
+            if args[1:] == ("api-base", "current-base"):
+                return "api-base"
+            if args[1:] == ("current-base", "head-sha"):
+                return "current-base"
+            raise AssertionError(f"Unexpected merge-base arguments: {args[1:]}")
         if args[:2] == ("worktree", "add"):
             worktree_adds.append(args)
             Path(args[-2]).mkdir(parents=True, exist_ok=True)
@@ -469,6 +494,15 @@ def test_review_uses_current_base_when_pr_base_is_its_ancestor(tmp_path, monkeyp
     assert [args[-1] for args in worktree_adds] == ["current-base", "current-base"]
     assert merges == [("-C", str(Path(worktree_adds[1][-2])), "merge", "--no-edit", "--no-commit", "--no-ff", "head-sha")]
     assert github.get.call_count == 2  # metadata and changed-files list
+
+
+def test_unrelated_pr_history_has_actionable_recovery_guidance(tmp_path, monkeypatch):
+    def fail_merge_base(*_args):
+        raise RuntimeError("git merge-base failed")
+
+    monkeypatch.setattr(review, "_git", fail_merge_base)
+    with pytest.raises(ValueError, match="no common Git ancestor.*rebase.*recreate"):
+        review._require_common_history(tmp_path, "current-main", "dependabot-head")
 
 
 def test_review_reports_shas_when_pr_refs_never_match(tmp_path, monkeypatch):

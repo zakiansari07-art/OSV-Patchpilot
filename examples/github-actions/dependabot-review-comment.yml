@@ -8,7 +8,6 @@ on:
 permissions:
   actions: read
   contents: read
-  issues: write
 
 jobs:
   comment:
@@ -20,7 +19,6 @@ jobs:
     permissions:
       actions: read
       contents: read
-      issues: write
     steps:
       # workflow_run executes trusted workflow code from the default branch.
       # This job downloads JSON evidence only; it never checks out or executes
@@ -70,7 +68,7 @@ jobs:
       - name: Generate and post the PR review
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          GITHUB_TOKEN: ${{ github.token }}
+          GITHUB_TOKEN: ${{ secrets.REVIEW_COMMENT_TOKEN }}
           EXPECTED_PR: ${{ github.event.workflow_run.pull_requests[0].number }}
           EXPECTED_REPOSITORY: ${{ github.repository }}
           EXPECTED_HEAD_SHA: ${{ github.event.workflow_run.pull_requests[0].head.sha }}
