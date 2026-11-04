@@ -1,0 +1,21 @@
+# Local credentials and runtime configuration
+.env
+.env.*
+!.env.example
+
+# Python environments and generated files
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Local agent state and generated reports
+*.sqlite3
+*.db
+run-report.json
+saved report/*.json
+!saved report/.gitkeep
+
+
+docs/*.md

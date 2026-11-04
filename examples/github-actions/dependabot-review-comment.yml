@@ -1,0 +1,85 @@
+name: Dependabot AI Review Comment
+
+on:
+  workflow_run:
+    workflows: [Dependabot AI Review Evidence]
+    types: [completed]
+
+permissions:
+  actions: read
+  contents: read
+  issues: write
+
+jobs:
+  comment:
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.actor.login == 'dependabot[bot]' &&
+      github.event.workflow_run.pull_requests[0] != null
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+      issues: write
+    steps:
+      # workflow_run executes trusted workflow code from the default branch.
+      # This job downloads JSON evidence only; it never checks out or executes
+      # the Dependabot branch or artifact contents.
+      - name: Checkout the agent
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ vars.VULNERABILITY_AGENT_REPOSITORY }}
+          ref: ${{ vars.VULNERABILITY_AGENT_COMMIT }}
+          path: agent
+          persist-credentials: false
+
+      - name: Download evidence from the completed run
+        uses: actions/download-artifact@v4
+        with:
+          name: dependabot-review-${{ github.event.workflow_run.pull_requests[0].number }}
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          path: evidence
+
+      - name: Find a direct link to the full evidence artifact
+        id: report-artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
+          ARTIFACT_NAME: dependabot-review-${{ github.event.workflow_run.pull_requests[0].number }}
+        run: |
+          set -euo pipefail
+          artifact_id="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${RUN_ID}/artifacts" \
+            | jq -r --arg name "$ARTIFACT_NAME" '.artifacts[] | select(.name == $name) | .id' \
+            | head -n 1)"
+          if [ -z "$artifact_id" ]; then
+            echo "Could not find the Dependabot evidence artifact for this run." >&2
+            exit 1
+          fi
+          echo "url=${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${RUN_ID}/artifacts/${artifact_id}" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install the agent
+        run: python -m pip install -r agent/requirements.txt
+
+      - name: Generate and post the PR review
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          GITHUB_TOKEN: ${{ github.token }}
+          EXPECTED_PR: ${{ github.event.workflow_run.pull_requests[0].number }}
+          EXPECTED_REPOSITORY: ${{ github.repository }}
+          EXPECTED_HEAD_SHA: ${{ github.event.workflow_run.pull_requests[0].head.sha }}
+          REPORT_ARTIFACT_URL: ${{ steps.report-artifact.outputs.url }}
+        run: >-
+          python agent/main.py
+          --analyze-report evidence/dependabot-review.json
+          --post-comment
+          --report-artifact-url "$REPORT_ARTIFACT_URL"
+          --expected-pr "$EXPECTED_PR"
+          --expected-repository "$EXPECTED_REPOSITORY"
+          --expected-head-sha "$EXPECTED_HEAD_SHA"
