@@ -19,6 +19,36 @@ from vulnerability_agent.dependencies import AgentDependencies
 from vulnerability_agent.nodes import patching, usage_analysis
 
 
+def _run_usage_analysis(tmp_path, monkeypatch, *, package="demo", sources=None, retrieved=None, history=None):
+    sources = sources or {}
+
+    class EmptyIndexRetriever:
+        def has_index(self, *_args, **_kwargs):
+            return False
+
+        def index_sources(self, *_args, **_kwargs):
+            return 0
+
+        def retrieve(self, *_args, **_kwargs):
+            return retrieved or []
+
+    monkeypatch.setattr(usage_analysis, "_source_paths", lambda *_args: (list(sources), len(sources)))
+    monkeypatch.setattr(usage_analysis, "_read_sources", lambda *_args: sources)
+    def run(command, *_args, **_kwargs):
+        if command[:2] == ["git", "rev-parse"]:
+            return SimpleNamespace(returncode=1, stdout="", stderr="")
+        if command[:2] == ["git", "grep"]:
+            return SimpleNamespace(returncode=1, stdout="", stderr="")
+        return SimpleNamespace(returncode=1, stdout="", stderr="")
+    monkeypatch.setattr(usage_analysis.subprocess, "run", run)
+    result = usage_analysis.node_report_source_usage({
+        "repo_path": str(tmp_path), "main_repo_path": str(tmp_path),
+        "current_vuln": {"id": "OSV-DEMO", "summary": "demo advisory", "package": {"name": package}},
+        "usage_analysis": history or [],
+    }, AgentDependencies(tools=object(), code_retriever=EmptyIndexRetriever()))
+    return result["current_usage_analysis"]
+
+
 def test_python_code_is_chunked_by_function_with_line_metadata():
     source = """import requests
 
@@ -138,11 +168,81 @@ def test_zero_chunk_rag_index_uses_literal_fallback_for_report_only_locations(tm
     assert "app.py" in captured["sources"]
     analysis = result["current_usage_analysis"]
     assert analysis["retrieval"]["backend"] == "qdrant_local_hybrid"
-    assert analysis["retrieval"]["fallback"] == "literal package search"
+    assert "fallback" not in analysis["retrieval"]
     assert analysis["locations"][0]["path"] == "app.py"
-    assert analysis["locations"][0]["symbol"] == "text match"
-    assert "render_report" in analysis["locations"][0]["excerpt"]
+    assert analysis["locations"][0]["symbol"] == "import"
+    assert analysis["locations"][0]["evidence_classification"] == "direct_import"
+    assert "from demo import render_report" in analysis["locations"][0]["excerpt"]
     assert "not prove" in analysis["note"]
+
+
+def test_python_explicit_import_is_classified_as_direct_import(monkeypatch):
+    monkeypatch.setattr(usage_analysis.subprocess, "run", lambda *_args, **_kwargs: SimpleNamespace(
+        returncode=1, stdout="", stderr="",
+    ))
+    location = usage_analysis._explicit_locations(
+        "aiohttp", {"src/client.py": "import aiohttp\n\ndef fetch():\n    return aiohttp.get('/')\n"}, Path("/repo"),
+    )[0]
+    assert location["evidence_classification"] == "direct_import"
+    assert location["path"] == "src/client.py"
+    assert location["line_start"] == location["line_end"] == 1
+
+
+def test_package_reference_in_configuration_is_classified(monkeypatch, tmp_path):
+    monkeypatch.setattr(usage_analysis.subprocess, "run", lambda *_args, **_kwargs: SimpleNamespace(
+        returncode=0, stdout="pyproject.toml:8:aiohttp = '^3.9'\n", stderr="",
+    ))
+    locations = usage_analysis._configuration_references(tmp_path, "aiohttp")
+    assert locations[0]["evidence_classification"] == "package_reference"
+    assert locations[0]["path"] == "pyproject.toml"
+    assert locations[0]["line_start"] == 8
+
+
+def test_semantic_retrieval_is_labeled_context_not_package_usage(monkeypatch, tmp_path):
+    analysis = _run_usage_analysis(tmp_path, monkeypatch, retrieved=[{
+        "path": "src/flights.py", "line_start": 10, "line_end": 14,
+        "symbol": "find_flights", "content": "def find_flights():\n    return search()",
+    }])
+    assert analysis["evidence_classification"] == "semantic_context"
+    assert analysis["locations"][0]["evidence_classification"] == "semantic_context"
+
+
+def test_no_source_match_returns_explicit_no_evidence(monkeypatch, tmp_path):
+    analysis = _run_usage_analysis(tmp_path, monkeypatch)
+    assert analysis["locations"] == []
+    assert analysis["evidence_classification"] == "no_evidence"
+
+
+def test_duplicate_retrieval_locations_are_removed_and_strongest_evidence_wins():
+    locations = usage_analysis._deduplicate_locations([
+        {"path": "src/a.py", "line_start": 4, "line_end": 6, "rank": 1, "evidence_classification": "semantic_context"},
+        {"path": "src/a.py", "line_start": 4, "line_end": 6, "rank": 5, "evidence_classification": "direct_import"},
+    ])
+    assert len(locations) == 1
+    assert locations[0]["evidence_classification"] == "direct_import"
+
+
+def test_generic_semantic_location_is_not_reused_for_an_unrelated_package(monkeypatch, tmp_path):
+    generic = {"path": "src/common.py", "line_start": 2, "line_end": 4,
+               "symbol": "search", "content": "def search():\n    return query()"}
+    history = [{"package": "first-package", "locations": [{
+        **generic, "evidence_classification": "semantic_context",
+    }]}]
+    analysis = _run_usage_analysis(
+        tmp_path, monkeypatch, package="second-package", retrieved=[generic], history=history,
+    )
+    assert analysis["locations"] == []
+    assert analysis["evidence_classification"] == "no_evidence"
+
+
+@pytest.mark.parametrize("retrieved", [
+    [{"line_start": 1, "line_end": 2, "content": "context"}],
+    [{"path": "src/a.py", "line_end": 2, "content": "context"}],
+])
+def test_retrieval_results_missing_path_or_line_metadata_are_skipped(monkeypatch, tmp_path, retrieved):
+    analysis = _run_usage_analysis(tmp_path, monkeypatch, retrieved=retrieved)
+    assert analysis["locations"] == []
+    assert analysis["evidence_classification"] == "no_evidence"
 
 
 def test_mcp_multiple_file_output_is_mapped_back_to_relative_paths(tmp_path):

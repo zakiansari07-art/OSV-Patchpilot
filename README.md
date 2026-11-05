@@ -276,7 +276,7 @@ OSV remediation reports use a separate run-report structure with workflow status
 
 ## RAG and source usage clues
 
-RAG is used as a **reporting aid** during Dependabot review and OSV remediation. It indexes a bounded set of Python/JavaScript/TypeScript source files, chunks code with AST/Tree-sitter where possible, and combines local vector search (Qdrant/FastEmbed) with BM25 keyword search. The report can show a package's likely file, line, symbol, and short excerpt.
+RAG is used as a **reporting aid** during Dependabot review and OSV remediation. It indexes a bounded set of Python/JavaScript/TypeScript source files, chunks code with AST/Tree-sitter where possible, and combines local vector search (Qdrant/FastEmbed) with BM25 keyword search. Each reported location is labeled `direct_import`, `package_reference`, or `semantic_context`; packages with no traceable location are labeled `no_evidence`. Semantic matches are context only and are never presented as proof of package usage. Direct imports and textual references do not prove vulnerable code is reachable. Lockfile mentions alone are not treated as source evidence.
 
 These results help a developer navigate to code that may use a dependency. They do not prove the dependency is reachable or vulnerable, and they are not instructions for an automatic source-code patch. The remediation LLM focuses on dependency declarations; it does not receive these source excerpts as patch context.
 
