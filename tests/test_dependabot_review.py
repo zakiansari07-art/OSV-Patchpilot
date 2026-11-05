@@ -329,6 +329,9 @@ def test_review_runs_base_then_head_and_reports_osv_delta(tmp_path, monkeypatch)
     monkeypatch.setattr(review, "_git", fake_git)
     monkeypatch.setattr(review, "_test", fake_test)
     monkeypatch.setattr(review, "_scan", lambda *_: next(scans))
+    monkeypatch.setattr(review, "_dependency_changes", lambda *_: [{
+        "package": "demo", "ecosystem": "pypi", "base_version": "1.0", "head_version": "2.0",
+    }])
 
     result = review.review_dependabot_pull_request(
         repository, "17", github_client=github,
@@ -344,7 +347,8 @@ def test_review_runs_base_then_head_and_reports_osv_delta(tmp_path, monkeypatch)
     assert result["tests"]["pr"]["passed"] is True
     assert result["files_changed"][0]["path"] == "requirements.txt"
     assert result["files_truncated"] is True
-    assert result["summary"]["osv"] == {"resolved": 1, "introduced": 0, "remaining": 0}
+    assert result["summary"]["osv"]["resolved"] == 1
+    assert result["summary"]["osv"]["unaffected"] == 0
     assert result["osv_scans"]["base"]["finding_count"] == 1
     assert result["security_delta"]["resolved"] == [{
         "package": "demo", "ecosystem": "PyPI", "version": "1.0",
@@ -353,6 +357,97 @@ def test_review_runs_base_then_head_and_reports_osv_delta(tmp_path, monkeypatch)
         }],
     }]
     assert github.get.call_count == 2
+
+
+def test_actions_only_update_keeps_python_baseline_out_of_pr_delta():
+    finding = {"id": "OSV-BASE", "package": "aiohttp", "version": "3.8.0", "ecosystem": "PyPI"}
+    delta = review._pr_security_delta(
+        {"scan_status": "complete", "findings": [finding]},
+        {"scan_status": "complete", "findings": [finding]},
+        [], scan_scope_changed=False,
+    )
+    assert delta["resolved"] == delta["introduced"] == delta["remaining"] == []
+    assert delta["unaffected"] == [finding]
+    report = review._compact_review_report({
+        "files_changed": [{"path": ".github/workflows/ci.yml", "category": "github_actions_workflow"}],
+        "base": {"security_scan": {"findings": [finding]}, "tests": {"passed": True}},
+        "head": {"security_scan": {"findings": [finding]}, "tests": {"passed": True}},
+        "security_delta": delta, "dependency_changes": [],
+        "test_comparison": {"base_passed": True, "pr_passed": True},
+    })
+    assert report["summary"]["osv"]["introduced"] == 0
+    assert report["summary"]["osv"]["remaining"] == 0
+    assert report["summary"]["osv"]["unaffected"] == 1
+    assert "do not assess GitHub Actions" in report["summary"]["osv_scope_note"]
+
+
+@pytest.mark.parametrize(("base_findings", "head_findings", "classification"), [
+    ([{"id": "GHSA-1", "package": "demo", "version": "1", "ecosystem": "PyPI"}], [], "resolved"),
+    ([], [{"id": "GHSA-1", "package": "demo", "version": "2", "ecosystem": "PyPI"}], "introduced"),
+    ([{"id": "GHSA-1", "package": "demo", "version": "1", "ecosystem": "PyPI"}],
+     [{"id": "GHSA-1", "package": "demo", "version": "2", "ecosystem": "PyPI"}], "remaining"),
+])
+def test_changed_python_dependency_findings_are_classified(base_findings, head_findings, classification):
+    delta = review._pr_security_delta(
+        {"scan_status": "complete", "findings": base_findings},
+        {"scan_status": "complete", "findings": head_findings},
+        [{"package": "demo", "ecosystem": "pypi", "base_version": "1", "head_version": "2"}],
+        scan_scope_changed=True,
+    )
+    assert len(delta[classification]) == 1
+    assert sum(len(delta[key]) for key in ("resolved", "introduced", "remaining")) == 1
+
+
+def test_failed_osv_scan_is_not_reported_as_zero_findings():
+    delta = review._pr_security_delta(
+        {"scan_status": "failed", "findings": []}, {"scan_status": "complete", "findings": []},
+        [{"package": "demo", "ecosystem": "pypi", "base_version": "1", "head_version": "2"}],
+        scan_scope_changed=True,
+    )
+    assert delta["resolved"] == delta["introduced"] == delta["remaining"] == []
+    assert delta["not_assessed"][0]["package"] == "demo"
+
+
+def test_missing_osv_scan_results_are_not_treated_as_empty_success():
+    delta = review._pr_security_delta(
+        {}, {"scan_status": "complete", "findings": []},
+        [{"package": "demo", "ecosystem": "pypi", "base_version": "1", "head_version": "2"}],
+        scan_scope_changed=True,
+    )
+    assert delta["resolved"] == delta["introduced"] == delta["remaining"] == []
+    assert delta["not_assessed"][0]["package"] == "demo"
+
+
+def test_unresolved_changed_package_is_not_reported_as_zero_vulnerabilities():
+    delta = review._pr_security_delta(
+        {"scan_status": "complete", "findings": [], "unresolved_packages": []},
+        {"scan_status": "complete", "findings": [], "unresolved_packages": ["demo"]},
+        [{"package": "demo", "ecosystem": "pypi", "base_version": "1", "head_version": ""}],
+        scan_scope_changed=True,
+    )
+    assert delta["not_assessed"][0]["package"] == "demo"
+
+
+def test_changed_file_categories_cover_dependency_actions_config_and_source():
+    assert review._changed_file_category("pyproject.toml") == "dependency_manifest"
+    assert review._changed_file_category("poetry.lock") == "dependency_lockfile"
+    assert review._changed_file_category(".github/workflows/ci.yml") == "github_actions_workflow"
+    assert review._changed_file_category(".pre-commit-config.yaml") == "configuration"
+    assert review._changed_file_category("src/app.py") == "application_source"
+    assert review._changed_file_category("README.md") == "other"
+
+
+def test_multiple_supported_dependency_manifests_are_scanned_as_background_inventory(tmp_path):
+    (tmp_path / "poetry.lock").write_text('''[[package]]
+name = "demo"
+version = "1.0"
+''')
+    (tmp_path / "package.json").write_text('{"dependencies": {"left-pad": "1.3.0"}}')
+    packages, manifests = review._read_packages(tmp_path)
+    assert manifests == ["poetry.lock", "package.json"]
+    assert {(item["ecosystem"], item["name"]) for item in packages} == {
+        ("PyPI", "demo"), ("npm", "left-pad"),
+    }
 
 
 def test_report_compaction_groups_advisories_and_limits_rag_locations():
