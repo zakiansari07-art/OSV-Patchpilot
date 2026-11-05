@@ -702,7 +702,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             report = review_state.get("report", {})
         except Exception as exc:
             report = {
-                "schema_version": 2, "mode": "dependabot_pr_review", "status": "review_failed",
+                "schema_version": 3, "mode": "dependabot_pr_review", "status": "review_failed",
                 "repository": str(repo), "pull_request_reference": args.review_pr,
                 "error": f"{type(exc).__name__}: {exc}",
                 "note": "Review-only workflow; no push, PR creation, merge, or comment was attempted.",

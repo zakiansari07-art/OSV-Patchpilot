@@ -342,7 +342,7 @@ def test_review_runs_base_then_head_and_reports_osv_delta(tmp_path, monkeypatch)
     assert [path.name for path in seen_tests] == ["base", "head"]
     assert seen_usage[0][0] == seen_tests[1]
     assert seen_usage[0][1][0]["id"] == "GHSA-old"
-    assert result["schema_version"] == 2
+    assert result["schema_version"] == 3
     assert result["tests"]["base"]["passed"] is True
     assert result["tests"]["pr"]["passed"] is True
     assert result["files_changed"][0]["path"] == "requirements.txt"
@@ -350,12 +350,11 @@ def test_review_runs_base_then_head_and_reports_osv_delta(tmp_path, monkeypatch)
     assert result["summary"]["osv"]["resolved"] == 1
     assert result["summary"]["osv"]["unaffected"] == 0
     assert result["osv_scans"]["base"]["finding_count"] == 1
-    assert result["security_delta"]["resolved"] == [{
-        "package": "demo", "ecosystem": "PyPI", "version": "1.0",
-        "advisory_count": 1, "advisories": [{
-            "id": "GHSA-old", "summary": "old", "url": "https://osv.dev/vulnerability/GHSA-old",
-        }],
-    }]
+    resolved = result["security_delta"]["resolved"][0]
+    assert (resolved["package"], resolved["ecosystem"], resolved["version"]) == ("demo", "PyPI", "1.0")
+    assert resolved["advisory_count"] == 1
+    assert resolved["advisories"][0]["id"] == "GHSA-old"
+    assert resolved["advisories"][0]["fixed_version_status"] == "unavailable"
     assert github.get.call_count == 2
 
 
@@ -450,6 +449,77 @@ version = "1.0"
     }
 
 
+def test_scan_preserves_osv_evidence_and_deduplicates_per_package_advisory(tmp_path, monkeypatch):
+    (tmp_path / "poetry.lock").write_text('''[[package]]
+name = "alpha"
+version = "1.0"
+
+[[package]]
+name = "beta"
+version = "2.0"
+''')
+    advisory = {
+        "id": "GHSA-shared", "summary": "Security issue", "severity": [{"type": "CVSS_V3", "score": "8.1"}],
+        "affected": [{"package": {"name": "alpha", "ecosystem": "PyPI"}, "ranges": [{
+            "type": "ECOSYSTEM", "events": [{"introduced": "0"}, {"fixed": "1.2"}],
+        }]}],
+        "references": [{"type": "WEB", "url": "https://example.test/advisory"}],
+    }
+    findings = [
+        {**advisory, "package": {"name": "alpha", "version": "1.0", "ecosystem": "PyPI"}},
+        {**advisory, "package": {"name": "alpha", "version": "1.0", "ecosystem": "PyPI"}},
+        {"id": "GHSA-shared", "summary": "Shared advisory", "package": {"name": "beta", "version": "2.0", "ecosystem": "PyPI"}},
+        {"id": "GHSA-second", "summary": "Another advisory", "package": {"name": "alpha", "version": "1.0", "ecosystem": "PyPI"}},
+    ]
+    monkeypatch.setattr(review, "run_async", lambda awaitable: (awaitable.close(), findings)[1])
+    monkeypatch.setattr(review, "_dependency_index", lambda _root: (
+        {("pypi", "alpha")}, {("pypi", "alpha"): {("pypi", "beta")}},
+    ))
+
+    result = review._scan(tmp_path, None)
+    records = result["findings"]
+    assert len(records) == 3  # alpha/shared duplicate collapsed; beta/shared retained
+    alpha_shared = next(item for item in records if item["package"] == "alpha" and item["id"] == "GHSA-shared")
+    beta_shared = next(item for item in records if item["package"] == "beta")
+    assert alpha_shared["finding_identity"] != beta_shared["finding_identity"]
+    assert alpha_shared["severity"] == [{"type": "CVSS_V3", "score": "8.1"}]
+    assert alpha_shared["affected_ranges"][0]["events"][-1]["fixed"] == "1.2"
+    assert alpha_shared["fixed_versions"] == ["1.2"]
+    assert alpha_shared["manifest_files"] == ["poetry.lock"]
+    assert alpha_shared["relationship"] == "direct"
+    assert alpha_shared["dependency_paths"] == [["alpha"]]
+    assert beta_shared["severity_status"] == "unavailable"
+    assert beta_shared["fixed_version_status"] == "unavailable"
+    assert beta_shared["dependency_path_status"] == "available"
+    assert beta_shared["dependency_paths"] == [["alpha", "beta"]]
+
+
+def test_compact_schema_serializes_complete_package_advisory_provenance():
+    finding = {
+        "id": "GHSA-1", "finding_identity": "pypi:demo:ghsa-1", "package": "demo",
+        "ecosystem": "PyPI", "version": "1.0", "installed_version": "1.0",
+        "severity": [], "severity_status": "unavailable", "affected_ranges": [],
+        "affected_versions": [], "affected_range_status": "unavailable", "fixed_versions": [],
+        "fixed_version_status": "unavailable", "manifest_files": ["poetry.lock"],
+        "relationship": "unknown", "dependency_paths": [], "dependency_path_status": "unavailable",
+        "references": [], "summary": "A finding",
+    }
+    delta = {key: [] for key in ("resolved", "introduced", "remaining", "unaffected", "not_assessed")}
+    delta["remaining"] = [finding]
+    report = review._compact_review_report({
+        "base": {"security_scan": {"scan_status": "complete", "findings": [finding]}},
+        "head": {"security_scan": {"scan_status": "complete", "findings": [finding]}},
+        "security_delta": delta, "dependency_changes": [],
+    })
+    loaded = json.loads(json.dumps(report))
+    assert loaded["schema_version"] == 3
+    advisory = loaded["security_delta"]["remaining"][0]["advisories"][0]
+    assert advisory["finding_identity"] == "pypi:demo:ghsa-1"
+    assert advisory["fixed_version_status"] == "unavailable"
+    assert advisory["manifest_files"] == ["poetry.lock"]
+    assert loaded["osv_scans"]["pr"]["unique_advisory_count"] == 1
+
+
 def test_report_compaction_groups_advisories_and_limits_rag_locations():
     findings = [
         {"id": f"GHSA-{number}", "package": "demo", "version": "1.0", "ecosystem": "PyPI",
@@ -475,7 +545,7 @@ def test_report_compaction_groups_advisories_and_limits_rag_locations():
             "retrieval": {"backend": "qdrant_local_hybrid"},
         }],
     })
-    assert report["schema_version"] == 2
+    assert report["schema_version"] == 3
     assert report["summary"]["osv"]["remaining"] == 6
     assert len(report["security_delta"]["remaining"]) == 1
     assert report["security_delta"]["remaining"][0]["advisory_count"] == 6
