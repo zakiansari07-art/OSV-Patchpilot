@@ -157,7 +157,8 @@ def test_tests_are_not_run_when_snapshot_dependency_setup_fails(tmp_path, monkey
 def test_review_graph_runs_ai_analysis_and_skips_comment_by_default(monkeypatch):
     monkeypatch.setattr(
         "vulnerability_agent.review_graph.review_dependabot_pull_request",
-        lambda *_args, **_kwargs: {"status": "review_complete", "security_delta": {"remaining": []}},
+        lambda *_args, **_kwargs: {"schema_version": 2, "mode": "dependabot_pr_review",
+                                  "status": "review_complete", "security_delta": {"remaining": []}},
     )
 
     class Model:
@@ -176,7 +177,8 @@ def test_review_graph_runs_ai_analysis_and_skips_comment_by_default(monkeypatch)
 def test_review_graph_preserves_evidence_when_model_fails(monkeypatch):
     monkeypatch.setattr(
         "vulnerability_agent.review_graph.review_dependabot_pull_request",
-        lambda *_args, **_kwargs: {"status": "review_complete", "base": {"tests": {"passed": True}}},
+        lambda *_args, **_kwargs: {"schema_version": 2, "mode": "dependabot_pr_review",
+                                  "status": "review_complete", "base": {"tests": {"passed": True}}},
     )
 
     class FailingModel:
@@ -266,6 +268,7 @@ def test_review_graph_reports_comment_failure_without_losing_analysis(monkeypatc
         "vulnerability_agent.review_graph.review_dependabot_pull_request",
         lambda *_args, **_kwargs: {
             "status": "review_complete", "repository_full_name": "acme/demo",
+                "schema_version": 2, "mode": "dependabot_pr_review",
             "pull_request": {"number": 4}, "security_delta": {},
         },
     )

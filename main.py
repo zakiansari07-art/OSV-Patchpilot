@@ -21,6 +21,7 @@ from mcp_client import default_state_db_path
 from persistence import SQLiteAgentPersistence
 from reporting import _redact_source
 from vulnerability_agent.review_graph import build_dependabot_review_graph
+from vulnerability_agent.report_validation import validate_evidence_report
 
 
 _PROGRESS_LABELS = {
@@ -625,6 +626,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 precollected_report = json.loads(args.analyze_report.expanduser().read_text(encoding="utf-8"))
                 if not isinstance(precollected_report, dict) or precollected_report.get("mode") != "dependabot_pr_review":
                     raise ValueError("The report is not a Dependabot PR review artifact")
+                validate_evidence_report(precollected_report)
                 if args.report_artifact_url:
                     artifact = urlparse(args.report_artifact_url)
                     repo_parts = str(precollected_report.get("repository_full_name", "")).split("/")

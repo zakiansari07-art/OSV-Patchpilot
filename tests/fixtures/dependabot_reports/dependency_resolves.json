@@ -1,0 +1,290 @@
+{
+  "schema_version": 3,
+  "mode": "dependabot_pr_review",
+  "status": "review_complete",
+  "summary": {
+    "recommendation": "Review recommended: OSV findings were resolved; review the dependency diff and tests.",
+    "dependency_changes_detected": true,
+    "action_updates": [],
+    "dependency_updates": [
+      {
+        "package": "requests",
+        "from": "2.28.0",
+        "to": "2.31.0"
+      }
+    ],
+    "tests": {
+      "base": {
+        "passed": true,
+        "summary": "12 passed in 1.2s"
+      },
+      "pr": {
+        "passed": true,
+        "summary": "12 passed in 1.2s"
+      }
+    },
+    "osv": {
+      "resolved": 1,
+      "introduced": 0,
+      "remaining": 0,
+      "unaffected": 0,
+      "not_assessed": 0
+    },
+    "osv_scan_status": {
+      "base": "complete",
+      "pr": "complete"
+    },
+    "source_usage": {
+      "packages_with_locations": 0,
+      "location_count": 0,
+      "retrieval_methods": [
+        "hybrid"
+      ],
+      "note": "Locations provide context and do not prove vulnerable code reachability."
+    }
+  },
+  "repository_full_name": "acme/demo",
+  "pull_request": {
+    "number": 17,
+    "author": "dependabot[bot]",
+    "head_sha": "abc123",
+    "base_sha": "base123"
+  },
+  "files_changed": [
+    {
+      "path": "pyproject.toml",
+      "status": "modified",
+      "category": "dependency_manifest",
+      "additions": 1,
+      "deletions": 1,
+      "patch": "@@ dependencies changed"
+    }
+  ],
+  "files_truncated": false,
+  "dependency_changes": [
+    {
+      "package": "requests",
+      "ecosystem": "PyPI",
+      "base_version": "2.28.0",
+      "head_version": "2.31.0",
+      "relationship": "direct",
+      "dependency_paths": [
+        [
+          "requests"
+        ]
+      ]
+    }
+  ],
+  "tests": {
+    "base": {
+      "passed": true,
+      "returncode": 0,
+      "timed_out": false,
+      "command": [
+        "python",
+        "-m",
+        "pytest",
+        "-q"
+      ],
+      "summary": "12 passed in 1.2s"
+    },
+    "pr": {
+      "passed": true,
+      "returncode": 0,
+      "timed_out": false,
+      "command": [
+        "python",
+        "-m",
+        "pytest",
+        "-q"
+      ],
+      "summary": "12 passed in 1.2s"
+    }
+  },
+  "test_comparison": {
+    "base_passed": true,
+    "pr_passed": true,
+    "classification": "passed_on_base_and_pr",
+    "note": "Both snapshots passed; Python tests do not check workflow compatibility."
+  },
+  "osv_scans": {
+    "base": {
+      "status": "complete",
+      "manifests": [
+        "poetry.lock"
+      ],
+      "packages_checked": 31,
+      "unresolved_packages": [],
+      "finding_count": 1,
+      "unique_advisory_count": 1,
+      "affected_packages": [
+        {
+          "package": "requests",
+          "ecosystem": "PyPI",
+          "version": "2.28.0",
+          "installed_version": "2.28.0",
+          "advisory_count": 1,
+          "manifest_files": [
+            "poetry.lock"
+          ],
+          "relationship": "direct",
+          "dependency_paths": [
+            [
+              "requests"
+            ]
+          ],
+          "advisories": [
+            {
+              "id": "PYSEC-2023-1",
+              "finding_identity": "pypi:requests:pysec-2023-1",
+              "summary": "Request handling vulnerability",
+              "url": "https://osv.dev/vulnerability/PYSEC-2023-1",
+              "aliases": [
+                "CVE-2024-12345"
+              ],
+              "severity": [
+                {
+                  "type": "CVSS_V3",
+                  "score": "7.5"
+                }
+              ],
+              "severity_status": "available",
+              "affected_ranges": [
+                {
+                  "type": "ECOSYSTEM",
+                  "events": [
+                    {
+                      "introduced": "0"
+                    },
+                    {
+                      "fixed": "2.31.0"
+                    }
+                  ]
+                }
+              ],
+              "affected_versions": [],
+              "affected_range_status": "available",
+              "fixed_versions": [
+                "2.31.0"
+              ],
+              "fixed_version_status": "available",
+              "manifest_files": [
+                "poetry.lock"
+              ],
+              "relationship": "direct",
+              "dependency_paths": [
+                [
+                  "requests"
+                ]
+              ],
+              "dependency_path_status": "available",
+              "references": [
+                {
+                  "type": "ADVISORY",
+                  "url": "https://osv.dev/vulnerability/PYSEC-2023-1"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    "pr": {
+      "status": "complete",
+      "manifests": [
+        "poetry.lock"
+      ],
+      "packages_checked": 31,
+      "unresolved_packages": [],
+      "finding_count": 0,
+      "unique_advisory_count": 0,
+      "affected_packages": []
+    }
+  },
+  "security_delta": {
+    "counts": {
+      "resolved": 1,
+      "introduced": 0,
+      "remaining": 0,
+      "unaffected": 0,
+      "not_assessed": 0
+    },
+    "resolved": [
+      {
+        "package": "requests",
+        "ecosystem": "PyPI",
+        "version": "2.28.0",
+        "installed_version": "2.28.0",
+        "advisory_count": 1,
+        "manifest_files": [
+          "poetry.lock"
+        ],
+        "relationship": "direct",
+        "dependency_paths": [
+          [
+            "requests"
+          ]
+        ],
+        "advisories": [
+          {
+            "id": "PYSEC-2023-1",
+            "finding_identity": "pypi:requests:pysec-2023-1",
+            "summary": "Request handling vulnerability",
+            "url": "https://osv.dev/vulnerability/PYSEC-2023-1",
+            "aliases": [
+              "CVE-2024-12345"
+            ],
+            "severity": [
+              {
+                "type": "CVSS_V3",
+                "score": "7.5"
+              }
+            ],
+            "severity_status": "available",
+            "affected_ranges": [
+              {
+                "type": "ECOSYSTEM",
+                "events": [
+                  {
+                    "introduced": "0"
+                  },
+                  {
+                    "fixed": "2.31.0"
+                  }
+                ]
+              }
+            ],
+            "affected_versions": [],
+            "affected_range_status": "available",
+            "fixed_versions": [
+              "2.31.0"
+            ],
+            "fixed_version_status": "available",
+            "manifest_files": [
+              "poetry.lock"
+            ],
+            "relationship": "direct",
+            "dependency_paths": [
+              [
+                "requests"
+              ]
+            ],
+            "dependency_path_status": "available",
+            "references": [
+              {
+                "type": "ADVISORY",
+                "url": "https://osv.dev/vulnerability/PYSEC-2023-1"
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "introduced": [],
+    "remaining": [],
+    "unaffected": [],
+    "not_assessed": []
+  },
+  "source_usage": [],
+  "note": "Evidence fixture for offline report-to-comment regression tests."
+}

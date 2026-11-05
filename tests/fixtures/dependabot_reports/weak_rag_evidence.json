@@ -1,0 +1,168 @@
+{
+  "schema_version": 3,
+  "mode": "dependabot_pr_review",
+  "status": "review_complete",
+  "summary": {
+    "recommendation": "Insufficient evidence: the retrieved location is semantic context only and does not establish aiohttp usage.",
+    "dependency_changes_detected": true,
+    "action_updates": [],
+    "dependency_updates": [
+      {
+        "package": "aiohttp",
+        "from": "3.8.0",
+        "to": "3.9.0"
+      }
+    ],
+    "tests": {
+      "base": {
+        "passed": true,
+        "summary": "12 passed in 1.2s"
+      },
+      "pr": {
+        "passed": true,
+        "summary": "12 passed in 1.2s"
+      }
+    },
+    "osv": {
+      "resolved": 0,
+      "introduced": 0,
+      "remaining": 0,
+      "unaffected": 0,
+      "not_assessed": 0
+    },
+    "osv_scan_status": {
+      "base": "complete",
+      "pr": "complete"
+    },
+    "source_usage": {
+      "packages_with_locations": 1,
+      "location_count": 1,
+      "retrieval_methods": [
+        "hybrid"
+      ],
+      "note": "Locations provide context and do not prove vulnerable code reachability."
+    }
+  },
+  "repository_full_name": "acme/demo",
+  "pull_request": {
+    "number": 17,
+    "author": "dependabot[bot]",
+    "head_sha": "abc123",
+    "base_sha": "base123"
+  },
+  "files_changed": [
+    {
+      "path": "pyproject.toml",
+      "status": "modified",
+      "category": "dependency_manifest",
+      "additions": 1,
+      "deletions": 1,
+      "patch": "@@ dependencies changed"
+    }
+  ],
+  "files_truncated": false,
+  "dependency_changes": [
+    {
+      "package": "aiohttp",
+      "ecosystem": "PyPI",
+      "base_version": "3.8.0",
+      "head_version": "3.9.0",
+      "relationship": "direct",
+      "dependency_paths": [
+        [
+          "aiohttp"
+        ]
+      ]
+    }
+  ],
+  "tests": {
+    "base": {
+      "passed": true,
+      "returncode": 0,
+      "timed_out": false,
+      "command": [
+        "python",
+        "-m",
+        "pytest",
+        "-q"
+      ],
+      "summary": "12 passed in 1.2s"
+    },
+    "pr": {
+      "passed": true,
+      "returncode": 0,
+      "timed_out": false,
+      "command": [
+        "python",
+        "-m",
+        "pytest",
+        "-q"
+      ],
+      "summary": "12 passed in 1.2s"
+    }
+  },
+  "test_comparison": {
+    "base_passed": true,
+    "pr_passed": true,
+    "classification": "passed_on_base_and_pr",
+    "note": "Both snapshots passed; Python tests do not check workflow compatibility."
+  },
+  "osv_scans": {
+    "base": {
+      "status": "complete",
+      "manifests": [
+        "poetry.lock"
+      ],
+      "packages_checked": 31,
+      "unresolved_packages": [],
+      "finding_count": 0,
+      "unique_advisory_count": 0,
+      "affected_packages": []
+    },
+    "pr": {
+      "status": "complete",
+      "manifests": [
+        "poetry.lock"
+      ],
+      "packages_checked": 31,
+      "unresolved_packages": [],
+      "finding_count": 0,
+      "unique_advisory_count": 0,
+      "affected_packages": []
+    }
+  },
+  "security_delta": {
+    "counts": {
+      "resolved": 0,
+      "introduced": 0,
+      "remaining": 0,
+      "unaffected": 0,
+      "not_assessed": 0
+    },
+    "resolved": [],
+    "introduced": [],
+    "remaining": [],
+    "unaffected": [],
+    "not_assessed": []
+  },
+  "source_usage": [
+    {
+      "package": "aiohttp",
+      "advisory_count": 0,
+      "evidence_classification": "semantic_context",
+      "locations": [
+        {
+          "path": "agents/tools/flights_finder.py",
+          "line_start": 20,
+          "line_end": 28,
+          "symbol": "find_flights",
+          "area": "application",
+          "excerpt": "Builds an HTTP request for flight search results.",
+          "match_type": "semantic",
+          "evidence_classification": "semantic_context"
+        }
+      ]
+    }
+  ],
+  "note": "Evidence fixture for offline report-to-comment regression tests."
+}

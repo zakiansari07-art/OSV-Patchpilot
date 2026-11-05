@@ -270,6 +270,8 @@ The Dependabot report uses a compact, navigable layout:
 - `ai_review`: concise model assessment when analysis has run.
 - `report_artifact_url`: available when an Actions artifact URL was supplied.
 
+Schema v3 reports are validated before analysis or comment generation. The validator rejects malformed or internally inconsistent data, while valid reports with failed or unavailable scans retain an explicit incomplete status; missing findings are never filled in as zero. Earlier v1/v2 artifacts remain accepted through a limited compatibility check. The Python validation model also exposes a JSON Schema via `evidence_report_json_schema()`.
+
 The GitHub PR comment presents the key results first, shows only a few source clues, collapses the AI details, and links to the full Actions artifact when available.
 
 OSV remediation reports use a separate run-report structure with workflow status, scan findings, test attempts, verification, pending approval, branch/PR information, and failures. The approval checkpoint stores resumable state in SQLite (by default under `~/.vulnerability-patch-agent/`).

@@ -1,0 +1,159 @@
+{
+  "schema_version": 3,
+  "mode": "dependabot_pr_review",
+  "status": "review_complete",
+  "summary": {
+    "recommendation": "Insufficient evidence: the PR OSV scan failed, so the update impact is not assessed.",
+    "dependency_changes_detected": true,
+    "action_updates": [],
+    "dependency_updates": [
+      {
+        "package": "urllib3",
+        "from": "2.0.0",
+        "to": "2.1.0"
+      }
+    ],
+    "tests": {
+      "base": {
+        "passed": true,
+        "summary": "12 passed in 1.2s"
+      },
+      "pr": {
+        "passed": true,
+        "summary": "12 passed in 1.2s"
+      }
+    },
+    "osv": {
+      "resolved": 0,
+      "introduced": 0,
+      "remaining": 0,
+      "unaffected": 0,
+      "not_assessed": 1
+    },
+    "osv_scan_status": {
+      "base": "complete",
+      "pr": "failed"
+    },
+    "source_usage": {
+      "packages_with_locations": 0,
+      "location_count": 0,
+      "retrieval_methods": [
+        "hybrid"
+      ],
+      "note": "Locations provide context and do not prove vulnerable code reachability."
+    }
+  },
+  "repository_full_name": "acme/demo",
+  "pull_request": {
+    "number": 17,
+    "author": "dependabot[bot]",
+    "head_sha": "abc123",
+    "base_sha": "base123"
+  },
+  "files_changed": [
+    {
+      "path": "pyproject.toml",
+      "status": "modified",
+      "category": "dependency_manifest",
+      "additions": 1,
+      "deletions": 1,
+      "patch": "@@ dependencies changed"
+    }
+  ],
+  "files_truncated": false,
+  "dependency_changes": [
+    {
+      "package": "urllib3",
+      "ecosystem": "PyPI",
+      "base_version": "2.0.0",
+      "head_version": "2.1.0",
+      "relationship": "direct",
+      "dependency_paths": [
+        [
+          "urllib3"
+        ]
+      ]
+    }
+  ],
+  "tests": {
+    "base": {
+      "passed": true,
+      "returncode": 0,
+      "timed_out": false,
+      "command": [
+        "python",
+        "-m",
+        "pytest",
+        "-q"
+      ],
+      "summary": "12 passed in 1.2s"
+    },
+    "pr": {
+      "passed": true,
+      "returncode": 0,
+      "timed_out": false,
+      "command": [
+        "python",
+        "-m",
+        "pytest",
+        "-q"
+      ],
+      "summary": "12 passed in 1.2s"
+    }
+  },
+  "test_comparison": {
+    "base_passed": true,
+    "pr_passed": true,
+    "classification": "passed_on_base_and_pr",
+    "note": "Both snapshots passed; Python tests do not check workflow compatibility."
+  },
+  "osv_scans": {
+    "base": {
+      "status": "complete",
+      "manifests": [
+        "poetry.lock"
+      ],
+      "packages_checked": 31,
+      "unresolved_packages": [],
+      "finding_count": 0,
+      "unique_advisory_count": 0,
+      "affected_packages": []
+    },
+    "pr": {
+      "status": "failed",
+      "manifests": [
+        "poetry.lock"
+      ],
+      "packages_checked": 31,
+      "unresolved_packages": [],
+      "finding_count": 0,
+      "unique_advisory_count": 0,
+      "affected_packages": [],
+      "error": "OSV request timed out"
+    }
+  },
+  "security_delta": {
+    "counts": {
+      "resolved": 0,
+      "introduced": 0,
+      "remaining": 0,
+      "unaffected": 0,
+      "not_assessed": 1
+    },
+    "resolved": [],
+    "introduced": [],
+    "remaining": [],
+    "unaffected": [],
+    "not_assessed": [
+      {
+        "reason": "PR snapshot OSV scan failed; impact cannot be compared.",
+        "package": "urllib3",
+        "ecosystem": "PyPI",
+        "base_version": "2.0.0",
+        "head_version": "2.1.0"
+      }
+    ]
+  },
+  "source_usage": [],
+  "note": "Evidence fixture for offline report-to-comment regression tests."
+}
