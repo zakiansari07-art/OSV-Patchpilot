@@ -21,7 +21,11 @@ from mcp_client import default_state_db_path
 from persistence import SQLiteAgentPersistence
 from reporting import _redact_source
 from vulnerability_agent.review_graph import build_dependabot_review_graph
-from vulnerability_agent.report_validation import validate_evidence_report
+from vulnerability_agent.report_validation import (
+    EvidenceReportValidationError,
+    report_validation_observability,
+    validate_evidence_report,
+)
 
 
 _PROGRESS_LABELS = {
@@ -709,6 +713,11 @@ def main(argv: Sequence[str] | None = None) -> int:
                 "error": f"{type(exc).__name__}: {exc}",
                 "note": "Review-only workflow; no push, PR creation, merge, or comment was attempted.",
             }
+            validation_status = "failed" if isinstance(exc, EvidenceReportValidationError) else "not_run"
+            report["validation"] = report_validation_observability(
+                report, status=validation_status,
+                errors=[str(exc)] if validation_status == "failed" else [],
+            )
         report["observability"] = {
             "langsmith_tracing": "enabled" if tracing_enabled else "disabled",
             "langsmith_project": os.getenv("LANGSMITH_PROJECT", "default") if tracing_enabled else "",

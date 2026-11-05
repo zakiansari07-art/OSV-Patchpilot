@@ -1,4 +1,5 @@
 import json
+import gzip
 from pathlib import Path
 from unittest.mock import Mock
 
@@ -7,21 +8,30 @@ import pytest
 from vulnerability_agent.report_validation import (
     EvidenceReportValidationError,
     evidence_report_json_schema,
+    report_validation_observability,
     validate_evidence_report,
 )
-from vulnerability_agent.review_graph import build_dependabot_review_graph
+from vulnerability_agent.review_graph import build_dependabot_review_graph, render_review_prompt
 
 
 FIXTURES = Path(__file__).parent / "fixtures" / "dependabot_reports"
 
 
 def load_report(name):
-    return json.loads((FIXTURES / f"{name}.json").read_text())
+    path = FIXTURES / name
+    if not path.suffix:
+        path = path.with_suffix(".json")
+    if path.suffix == ".gz":
+        return json.loads(gzip.decompress(path.read_bytes()))
+    return json.loads(path.read_text())
 
 
 class FakeReviewModel:
     def invoke(self, _messages):
-        return Mock(content="Evidence reviewed. See the structured findings and remaining uncertainty above.")
+        return Mock(content=(
+            "All functionality remains intact. The repository is secure. "
+            "The release notes prove compatibility."
+        ))
 
 
 class FakeGitHub:
@@ -47,6 +57,7 @@ def run_production_comment_path(report):
     graph = build_dependabot_review_graph(github_client=github, model=FakeReviewModel())
     state = graph.invoke({"report": report, "post_comment": True})
     assert state.get("comment_url", "").startswith("https://github.com/acme/demo/")
+    assert state["report"]["validation"]["status"] == "passed"
     assert github.body
     return github.body
 
@@ -102,10 +113,39 @@ def test_resolved_introduced_and_remaining_classifications_are_preserved():
 
 
 def test_weak_rag_evidence_is_labeled_as_semantic_context():
-    comment = run_production_comment_path(load_report("weak_rag_evidence"))
+    report = load_report("weak_rag_evidence")
+    report["summary"]["source_usage"]["retrieval_status"] = "completed_with_matches"
+    comment = run_production_comment_path(report)
     assert "semantic_context" in comment
     assert "none establishes vulnerable code reachability" in comment
     assert "does not establish aiohttp usage" in comment
+
+
+def test_zero_locations_with_completed_retrieval_are_distinct_from_not_executed():
+    report = load_report("pr10_sendgrid_report.json.gz")
+    report["summary"]["source_usage"].update({
+        "retrieval_status": "completed_without_matches",
+        "reason": None,
+    })
+    report["validation"] = report_validation_observability(report)
+    comment = run_production_comment_path(report)
+    assert "Source retrieval completed without matches" in comment
+    assert "does not establish that changed packages are unused" in comment
+    assert "Source retrieval was not executed" not in comment
+
+
+def test_failed_source_retrieval_is_explicit_and_nonfatal():
+    report = load_report("pr10_sendgrid_report.json.gz")
+    report["summary"]["source_usage"].update({
+        "retrieval_status": "failed",
+        "error": "Vector store was unavailable.",
+    })
+    report["validation"] = report_validation_observability(report)
+    comment = run_production_comment_path(report)
+    assert "Source retrieval failed: Vector store was unavailable" in comment
+    assert "package usage is unknown" in comment
+    assert report["validation"]["status"] == "passed"
+    assert any("Source retrieval failed" in warning for warning in report["validation"]["warnings"])
 
 
 def test_incomplete_osv_scan_is_not_rendered_as_zero_findings():
@@ -149,4 +189,57 @@ def test_published_json_schema_is_machine_readable_and_requires_core_fields():
     assert schema["properties"]["schema_version"]["const"] == 3
     assert {"schema_version", "mode", "status", "summary", "pull_request", "security_delta"} <= set(schema["required"])
     json.dumps(schema)
+
+
+def test_pr10_sendgrid_report_regression_uses_precise_counts_release_evidence_and_unknowns():
+    report = load_report("pr10_sendgrid_report.json.gz")
+    assert validate_evidence_report(report) is report
+    assert report["validation"]["status"] == "passed"
+    assert report["validation"]["schema_version"] == 3
+    assert any("Upstream release notes provide context" in warning for warning in report["validation"]["warnings"])
+
+    comment = run_production_comment_path(report)
+    assert "350 package-advisory findings across 25 package groups and 349 unique advisory IDs" in comment
+    assert "No OSV findings were identified for the changed dependencies" in comment
+    assert "starkbank-ecdsa" in comment and "removed" in comment
+    assert "cryptography" in comment and "added" in comment
+    assert "Replace ecdsa with cryptography" in comment
+    assert "sendgrid-python/pull/1114" in comment
+    assert "Source retrieval was not executed" in comment
+    assert "package usage is unknown" in comment
+    assert "Application-level compatibility remains unverified" in comment
+    assert "Passing tests apply to the tested suite and do not prove all application behavior remains compatible" in comment
+    assert "Review recommended:" in comment
+    assert "repository is secure" not in comment.casefold()
+    assert "All functionality remains intact" not in comment
+    assert "release notes prove compatibility" not in comment.casefold()
+
+    prompt = render_review_prompt(report)
+    assert len(prompt) <= 16_000
+    assert "Replace ecdsa with cryptography" in prompt
+    assert "count_semantics" in prompt
+    assert "retrieval_status" in prompt
+
+
+def test_report_validation_observability_records_nonblocking_warnings():
+    report = load_report("pr10_sendgrid_report.json.gz")
+    warnings = report["validation"]["warnings"]
+    assert any("Source retrieval was not executed" in warning for warning in warnings)
+    assert any("Pre-existing package-advisory findings remain" in warning for warning in warnings)
+
+
+def test_validation_failure_observability_keeps_sanitized_errors():
+    from vulnerability_agent.report_validation import report_validation_observability
+
+    report = load_report("pr10_sendgrid_report.json.gz")
+    report["security_delta"]["counts"]["unaffected"] = 0
+    with pytest.raises(EvidenceReportValidationError) as captured:
+        validate_evidence_report(report)
+    result = report_validation_observability(
+        report, status="failed", errors=[str(captured.value)],
+    )
+    assert result["status"] == "failed"
+    assert result["schema_version"] == 3
+    assert result["errors"]
+    assert "input_value" not in result["errors"][0]
 

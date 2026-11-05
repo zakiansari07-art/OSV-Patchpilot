@@ -353,6 +353,7 @@ def test_review_runs_base_then_head_and_reports_osv_delta(tmp_path, monkeypatch)
     assert result["summary"]["osv"]["resolved"] == 1
     assert result["summary"]["osv"]["unaffected"] == 0
     assert result["osv_scans"]["base"]["finding_count"] == 1
+    assert result["summary"]["source_usage"]["retrieval_status"] == "completed_without_matches"
     resolved = result["security_delta"]["resolved"][0]
     assert (resolved["package"], resolved["ecosystem"], resolved["version"]) == ("demo", "PyPI", "1.0")
     assert resolved["advisory_count"] == 1
@@ -411,6 +412,77 @@ def test_unaffected_advisory_is_counted_once_across_base_and_pr_snapshots():
 
     compact = review._compact_advisory_groups(delta["unaffected"])
     assert sum(item["advisory_count"] for item in compact) == 1
+
+
+def test_release_context_reads_version_range_and_links_dependency_replacement(monkeypatch):
+    class Response:
+        def __init__(self, payload, status_code=200):
+            self.payload = payload
+            self.status_code = status_code
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return self.payload
+
+    class Client:
+        def __init__(self, **_kwargs):
+            self.closed = False
+
+        def get(self, url, params=None):
+            if url.startswith("https://pypi.org/"):
+                return Response({"info": {"project_urls": {"Source": "https://github.com/sendgrid/sendgrid-python"}}})
+            if url.endswith("/releases"):
+                return Response([
+                    {"tag_name": "v6.13.0", "html_url": "https://github.com/sendgrid/sendgrid-python/releases/tag/v6.13.0", "body": "outside range"},
+                    {"tag_name": "v6.12.5", "html_url": "https://github.com/sendgrid/sendgrid-python/releases/tag/v6.12.5", "body": "Replace ecdsa with cryptography."},
+                    {"tag_name": "v6.12.0", "html_url": "https://github.com/sendgrid/sendgrid-python/releases/tag/v6.12.0", "body": "Intermediate fix."},
+                    {"tag_name": "v6.11.1", "html_url": "https://github.com/sendgrid/sendgrid-python/releases/tag/v6.11.1", "body": "Small maintenance release."},
+                    {"tag_name": "v6.11.0", "html_url": "https://github.com/sendgrid/sendgrid-python/releases/tag/v6.11.0", "body": "old endpoint excluded"},
+                ])
+            if "/releases/tags/" in url:
+                return Response({}, status_code=404)
+            raise AssertionError(f"unexpected release request {url} params={params}")
+
+        def close(self):
+            self.closed = True
+
+    monkeypatch.setattr(review.httpx, "Client", Client)
+    changes = [
+        {"package": "sendgrid", "ecosystem": "pypi", "base_version": "6.11.0", "head_version": "6.12.5", "relationship": "direct"},
+        {"package": "starkbank-ecdsa", "ecosystem": "pypi", "base_version": "2.2.0", "head_version": "removed", "relationship": "transitive"},
+        {"package": "cryptography", "ecosystem": "pypi", "base_version": "not present", "head_version": "50.0.2", "relationship": "transitive"},
+    ]
+    contexts = review._release_context(changes)
+    sendgrid = next(item for item in contexts if item["package"] == "sendgrid")
+    assert [item["version"] for item in sendgrid["releases"]] == ["6.11.1", "6.12.0", "6.12.5"]
+    explanations = {item["package"]: item for item in sendgrid["dependency_explanations"]}
+    assert explanations["starkbank-ecdsa"]["change"] == "removed"
+    assert explanations["starkbank-ecdsa"]["match_type"] == "package_name_component"
+    assert explanations["cryptography"]["change"] == "added"
+    assert explanations["starkbank-ecdsa"]["source_url"].endswith("v6.12.5")
+    assert sendgrid["application_impact"] == "unknown_without_source_evidence"
+
+
+def test_changelog_parser_extracts_only_intermediate_entries_in_version_range():
+    body = """# Changelog
+## 6.13.0
+Outside the requested range.
+## 6.12.5
+- Replace ecdsa with cryptography.
+## 6.12.0
+- Intermediate change.
+## 6.11.0
+- Existing baseline release.
+"""
+    entries = review._changelog_entries_in_range(
+        body, "https://example.test/changelog", "6.11.0", "6.12.5",
+    )
+    assert [item["version"] for item in entries] == ["6.12.0", "6.12.5"]
+    assert "Replace ecdsa with cryptography" in entries[-1]["notes"]
+    assert entries[-1]["source_kind"] == "changelog"
+    assert entries[-1]["url"] == "https://example.test/changelog"
 
 
 @pytest.mark.parametrize(("base_findings", "head_findings", "classification"), [

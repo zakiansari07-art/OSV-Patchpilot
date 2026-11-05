@@ -265,12 +265,13 @@ The Dependabot report uses a compact, navigable layout:
 - `pull_request` and `dependency_changes`: PR identity and package version changes.
 - `tests`: compact base and PR test outcomes; useful error output is retained when setup or tests fail.
 - `osv_scans` and `security_delta`: package-advisory findings with installed versions, severity and affected/fixed range data when OSV supplies it, manifest provenance, dependency relationship/path, and references. Missing advisory metadata is marked unavailable. Findings are keyed by package, ecosystem, and advisory ID; `unique_advisory_count` is separate from package-advisory finding counts. Schema version 3 retains the prior introduced, resolved, remaining, unaffected, and not-assessed classifications.
-- `source_usage`: up to three likely source locations per package, labeled as application or test code.
-- `release_context`: best-effort release notes or links where available.
+- `security_delta.count_semantics`: makes package-advisory finding counts distinct from package groups and unique advisory IDs.
+- `source_usage`: up to three likely source locations per package, labeled as application or test code, plus an explicit retrieval status (`completed_with_matches`, `completed_without_matches`, `not_executed`, or `failed`).
+- `release_context`: bounded upstream release history for changed version ranges, with links and explicit dependency-name matches where release notes explain additions or removals. This is upstream context, not application compatibility evidence.
 - `ai_review`: concise model assessment when analysis has run.
 - `report_artifact_url`: available when an Actions artifact URL was supplied.
 
-Schema v3 reports are validated before analysis or comment generation. The validator rejects malformed or internally inconsistent data, while valid reports with failed or unavailable scans retain an explicit incomplete status; missing findings are never filled in as zero. Earlier v1/v2 artifacts remain accepted through a limited compatibility check. The Python validation model also exposes a JSON Schema via `evidence_report_json_schema()`.
+Schema v3 reports are validated before analysis or comment generation. The `validation` field records status, schema version, errors, and non-blocking warnings. The validator rejects malformed or internally inconsistent data, while valid reports with failed or unavailable scans retain an explicit incomplete status; missing findings are never filled in as zero. Earlier v1/v2 artifacts remain accepted through a limited compatibility check. The Python validation model also exposes a JSON Schema via `evidence_report_json_schema()`.
 
 The GitHub PR comment presents the key results first, shows only a few source clues, collapses the AI details, and links to the full Actions artifact when available.
 
