@@ -383,6 +383,17 @@ def test_actions_only_update_keeps_python_baseline_out_of_pr_delta():
     assert "does not assess GitHub Actions security" in report["summary"]["osv_scope_note"]
 
 
+def test_compacted_scan_preserves_package_ecosystem_for_report_validation():
+    scan = review._compact_scan({
+        "scan_status": "complete",
+        "findings": [{
+            "id": "GHSA-TEST-1", "package": "sendgrid", "ecosystem": "PyPI",
+            "version": "6.12.5", "summary": "Test advisory",
+        }],
+    })
+    assert scan["affected_packages"][0]["ecosystem"] == "PyPI"
+
+
 @pytest.mark.parametrize(("base_findings", "head_findings", "classification"), [
     ([{"id": "GHSA-1", "package": "demo", "version": "1", "ecosystem": "PyPI"}], [], "resolved"),
     ([], [{"id": "GHSA-1", "package": "demo", "version": "2", "ecosystem": "PyPI"}], "introduced"),
