@@ -394,6 +394,25 @@ def test_compacted_scan_preserves_package_ecosystem_for_report_validation():
     assert scan["affected_packages"][0]["ecosystem"] == "PyPI"
 
 
+def test_unaffected_advisory_is_counted_once_across_base_and_pr_snapshots():
+    base_finding = {
+        "id": "GHSA-UNCHANGED", "package": "urllib3", "ecosystem": "PyPI",
+        "version": "1.26.0", "summary": "Existing issue",
+    }
+    pr_finding = {**base_finding, "version": "1.26.1"}
+    delta = review._pr_security_delta(
+        {"scan_status": "complete", "findings": [base_finding]},
+        {"scan_status": "complete", "findings": [pr_finding]},
+        [{"package": "sendgrid", "ecosystem": "pypi", "base_version": "6.11.0", "head_version": "6.12.5"}],
+        scan_scope_changed=True,
+    )
+    assert len(delta["unaffected"]) == 1
+    assert delta["unaffected"][0]["version"] == "1.26.1"
+
+    compact = review._compact_advisory_groups(delta["unaffected"])
+    assert sum(item["advisory_count"] for item in compact) == 1
+
+
 @pytest.mark.parametrize(("base_findings", "head_findings", "classification"), [
     ([{"id": "GHSA-1", "package": "demo", "version": "1", "ecosystem": "PyPI"}], [], "resolved"),
     ([], [{"id": "GHSA-1", "package": "demo", "version": "2", "ecosystem": "PyPI"}], "introduced"),
