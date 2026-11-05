@@ -377,7 +377,7 @@ def test_actions_only_update_keeps_python_baseline_out_of_pr_delta():
     assert report["summary"]["osv"]["introduced"] == 0
     assert report["summary"]["osv"]["remaining"] == 0
     assert report["summary"]["osv"]["unaffected"] == 1
-    assert "do not assess GitHub Actions" in report["summary"]["osv_scope_note"]
+    assert "does not assess GitHub Actions security" in report["summary"]["osv_scope_note"]
 
 
 @pytest.mark.parametrize(("base_findings", "head_findings", "classification"), [
@@ -564,16 +564,122 @@ def test_pr_comment_is_compact_and_links_full_report_artifact():
                       "pr": {"passed": True, "summary": "6 passed"}},
             "osv": {"resolved": 1, "introduced": 0, "remaining": 4},
             "recommendation": "Review the dependency change.",
+            "dependency_changes_detected": True,
         },
+        "files_changed": [{"path": "requirements.txt"}],
+        "test_comparison": {"classification": "passed_on_base_and_pr"},
         "source_usage": [{"package": "demo", "locations": [
             {"path": "src/app.py", "line_start": 5, "line_end": 8, "area": "application"}
         ]}],
     }, "## AI recommendation\nLooks reasonable.")
-    assert "1 resolved · 0 introduced · 4 remain" in body
+    assert "- Resolved findings: 1" in body
+    assert "- Remaining findings: 4" in body
+    assert "No regression detected" in body
+    assert "requirements.txt" in body
     assert "src/app.py:5-8" in body
     assert "[Open the full JSON report and run artifacts]" in body
     assert "<details>" in body
     assert len(body) < 2_500
+
+
+def test_pr5_actions_update_comment_separates_baseline_from_action_assessment():
+    from vulnerability_agent.dependabot_review import _compact_review_report
+
+    baseline = [
+        {"id": f"OSV-{index}", "package": f"pkg-{index}", "ecosystem": "PyPI", "version": "1.0",
+         "summary": "existing", "manifest_files": ["poetry.lock"]}
+        for index in range(350)
+    ]
+    delta = {key: [] for key in ("resolved", "introduced", "remaining", "unaffected", "not_assessed")}
+    delta["unaffected"] = baseline
+    report = _compact_review_report({
+        "mode": "dependabot_pr_review", "status": "review_complete",
+        "files_changed": [{
+            "path": ".github/workflows/ci.yml", "status": "modified", "category": "github_actions_workflow",
+            "patch": "@@\n-        uses: actions/setup-python@v5\n+        uses: actions/setup-python@v7",
+        }],
+        "base": {"tests": {"passed": True, "output": "18 passed in 2.4s"},
+                 "security_scan": {"scan_status": "complete", "findings": baseline}},
+        "head": {"tests": {"passed": True, "output": "18 passed in 2.3s"},
+                 "security_scan": {"scan_status": "complete", "findings": baseline}},
+        "test_comparison": {"base_passed": True, "pr_passed": True, "classification": "passed_on_base_and_pr"},
+        "security_delta": delta,
+        "dependency_changes": [],
+    })
+    report["tests"]["base"]["command"] = ["python", "-m", "pytest"]
+    report["tests"]["pr"]["command"] = ["python", "-m", "pytest"]
+
+    body = render_pr_comment(report, "")
+
+    assert "actions/setup-python" in body
+    assert "`v5` → `v7`" in body
+    assert "Dependency changes detected: no" in body
+    assert "Base: Python tests 18 passed in 2.4s" in body
+    assert "PR: Python tests 18 passed in 2.3s" in body
+    assert "No regression detected" in body
+    assert "Introduced findings: 0" in body and "Resolved findings: 0" in body and "Remaining findings: 0" in body
+    assert "Unaffected repository findings: 350" in body
+    assert "Unaffected baseline examples:" in body and "poetry.lock" in body
+    assert "not findings introduced by this update" in body
+    assert "Action version itself was not assessed" in body
+    assert "do not establish GitHub Actions workflow compatibility" in body
+    assert len(body) < 4_000
+
+
+@pytest.mark.parametrize(("classification", "count"), [
+    ("introduced", 1), ("resolved", 1), ("remaining", 1), ("unaffected", 1), ("not_assessed", 1),
+])
+def test_pr_comment_displays_structured_security_classifications(classification, count):
+    categories = {key: [] for key in ("introduced", "resolved", "remaining", "unaffected", "not_assessed")}
+    categories["counts"] = {key: 0 for key in categories}
+    categories["counts"][classification] = count
+    categories[classification] = [{"package": "demo", "advisory_count": 1, "advisories": [{"id": "GHSA-1"}]}]
+    report = {
+        "summary": {"dependency_changes_detected": True, "dependency_updates": [{"package": "demo", "from": "1", "to": "2"}],
+                    "osv": categories["counts"], "recommendation": "Review recommended."},
+        "security_delta": categories,
+    }
+    body = render_pr_comment(report, "")
+    label = {
+        "introduced": "Introduced findings", "resolved": "Resolved findings",
+        "remaining": "Remaining findings",
+        "not_assessed": "Not assessed findings", "unaffected": "Unaffected repository findings",
+    }.get(classification, classification.capitalize())
+    assert f"- {label}: 1" in body
+
+
+def test_pr_comment_labels_weak_and_missing_rag_evidence():
+    report = {
+        "summary": {"dependency_changes_detected": True, "recommendation": "Insufficient evidence."},
+        "source_usage": [
+            {"package": "semantic-only", "evidence_classification": "semantic_context", "locations": [
+                {"path": "src/common.py", "line_start": 3, "line_end": 5, "area": "application",
+                 "evidence_classification": "semantic_context"},
+            ]},
+            {"package": "no-match", "evidence_classification": "no_evidence", "locations": []},
+        ],
+    }
+    body = render_pr_comment(report, "")
+    assert "semantic_context" in body
+    assert "no source evidence found" in body
+    assert "none establishes vulnerable code reachability" in body
+
+
+def test_pr_comment_marks_incomplete_osv_scans_and_bounds_many_findings():
+    report = {
+        "summary": {"dependency_changes_detected": True,
+                    "osv_scan_status": {"base": "failed", "pr": "complete"},
+                    "osv": {"not_assessed": 100}, "recommendation": "Insufficient evidence."},
+        "security_delta": {"counts": {"introduced": 0, "resolved": 0, "remaining": 0,
+                                        "unaffected": 350, "not_assessed": 100},
+                           "unaffected": [{"package": f"pkg-{i}", "advisory_count": 1} for i in range(350)],
+                           "not_assessed": [{"reason": f"scan failure {i}"} for i in range(100)]},
+    }
+    body = render_pr_comment(report, "")
+    assert "missing findings are not zero findings" in body
+    assert "Unaffected repository findings: 350" in body
+    assert "Not assessed findings: 100" in body
+    assert len(body) < 3_500
 
 
 def test_review_rejects_non_dependabot_pr_before_fetching_refs(tmp_path, monkeypatch):
