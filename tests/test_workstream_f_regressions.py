@@ -426,11 +426,18 @@ def test_recommendation_includes_version_guidance_usage_and_unknown_reachability
             "resolved": [], "introduced": [],
             "remaining": [{"id": "GHSA-TEST", "package": "langchain-core", "ecosystem": "PyPI", "version": "0.2.41",
                            "affected_range_status": "available", "fixed_version_status": "available",
-                           "fixed_versions": ["0.2.42"], "aliases": ["CVE-2025-54321"]}],
+                           "fixed_versions": ["0.2.42"], "aliases": ["CVE-2025-54321"],
+                           "version_assessment": {"status": "affected", "assessment_status": "complete",
+                                                  "confidence": "deterministic", "installed_version": "0.2.41",
+                                                  "reason": "Test range contains installed version."}}],
             "unaffected": [], "not_assessed": [],
         },
     })
     recommendation = report["summary"]["recommendation"]
+    prompt = render_review_prompt(report)
+    assert '"status": "affected"' in prompt
+    assert '"installed_version": "0.2.41"' in prompt
+    assert '"fixed_versions": ["0.2.42"]' in prompt
     assert "langchain-core 0.2.41" in recommendation
     assert "affected range is available" in recommendation
     assert "fixed version available (0.2.42)" in recommendation
@@ -438,4 +445,14 @@ def test_recommendation_includes_version_guidance_usage_and_unknown_reachability
     assert "reachability unknown" in recommendation
     assert "do not establish vulnerable API reachability" in recommendation
     assert "exploitable" not in recommendation
+    assert "deterministic affected installed version" in recommendation
+    assert "Test evidence: base passed, PR passed" in recommendation
+    assert "passing tests do not change the OSV affected-version assessment" in recommendation
+    comment = render_pr_comment(
+        report,
+        "The langchain-core 0.2.41 version is not vulnerable and is safe to merge.",
+    )
+    assert "Deterministic installed-version assessment" in comment
+    assert "remaining: 1 affected" in comment
+    assert "not vulnerable and is safe to merge" not in comment
 

@@ -2,6 +2,7 @@ from unittest.mock import AsyncMock, Mock
 import pytest
 
 from osv_service import (
+    assess_version_affected_by_advisory,
     fixed_versions_for_finding,
     group_advisories_by_package,
     is_version_affected_by_advisory,
@@ -16,6 +17,17 @@ from osv_service import (
     verify_group_resolution,
     version_is_at_least,
 )
+
+
+def _range_advisory(events, *, ecosystem="PyPI", range_type="ECOSYSTEM", ranges=None):
+    return {
+        "id": "GHSA-TEST",
+        "package": {"name": "langchain", "version": "0.2.17", "ecosystem": ecosystem},
+        "affected": [{
+            "package": {"name": "langchain", "ecosystem": ecosystem},
+            "ranges": ranges if ranges is not None else [{"type": range_type, "events": events}],
+        }],
+    }
 
 
 def test_parse_requirements_handles_versions_and_ignores_options():
@@ -152,6 +164,77 @@ def test_range_checker_uses_inclusive_last_affected_boundary():
     }
     assert is_version_affected_by_advisory(finding, "1.5.0")
     assert not is_version_affected_by_advisory(finding, "1.5.1")
+
+
+def test_deterministic_assessment_marks_version_below_fixed_boundary_affected():
+    finding = _range_advisory([{"introduced": "0"}, {"fixed": "0.3.30"}])
+    result = assess_version_affected_by_advisory(finding, "0.2.17")
+    assert result["status"] == "affected"
+    assert result["assessment_status"] == "complete"
+    assert result["confidence"] == "deterministic"
+
+
+@pytest.mark.parametrize(("version", "expected"), [
+    ("0.2.17", "affected"),
+    ("0.3.30", "not_affected"),
+    ("0.4.0", "not_affected"),
+])
+def test_fixed_boundary_is_exclusive(version, expected):
+    finding = _range_advisory([{"introduced": "0"}, {"fixed": "0.3.30"}])
+    assert assess_version_affected_by_advisory(finding, version)["status"] == expected
+
+
+def test_multiple_osv_ranges_are_treated_as_union():
+    finding = _range_advisory([], ranges=[
+        {"type": "ECOSYSTEM", "events": [{"introduced": "1.0.0"}, {"fixed": "2.0.0"}]},
+        {"type": "ECOSYSTEM", "events": [{"introduced": "3.0.0"}, {"last_affected": "3.5.0"}]},
+    ])
+    assert assess_version_affected_by_advisory(finding, "1.5.0")["status"] == "affected"
+    assert assess_version_affected_by_advisory(finding, "2.5.0")["status"] == "not_affected"
+    assert assess_version_affected_by_advisory(finding, "3.5.0")["status"] == "affected"
+    assert assess_version_affected_by_advisory(finding, "3.5.1")["status"] == "not_affected"
+
+
+def test_multiple_intervals_in_one_osv_event_timeline_are_evaluated():
+    finding = _range_advisory([
+        {"introduced": "1.0.0"}, {"fixed": "2.0.0"},
+        {"introduced": "3.0.0"}, {"fixed": "4.0.0"},
+    ])
+    assert assess_version_affected_by_advisory(finding, "1.5.0")["status"] == "affected"
+    assert assess_version_affected_by_advisory(finding, "2.5.0")["status"] == "not_affected"
+    assert assess_version_affected_by_advisory(finding, "3.5.0")["status"] == "affected"
+
+
+def test_limit_star_is_osv_infinity():
+    finding = _range_advisory([{"introduced": "1.0.0"}, {"limit": "*"}])
+    assert assess_version_affected_by_advisory(finding, "2.0.0")["status"] == "affected"
+
+
+def test_open_introduced_range_without_fixed_version_remains_affected():
+    finding = _range_advisory([{"introduced": "1.0.0"}])
+    assert assess_version_affected_by_advisory(finding, "2.0.0")["status"] == "affected"
+
+
+def test_limit_event_is_exclusive():
+    finding = _range_advisory([{"introduced": "1.0.0"}, {"limit": "2.0.0"}])
+    assert assess_version_affected_by_advisory(finding, "1.9.9")["status"] == "affected"
+    assert assess_version_affected_by_advisory(finding, "2.0.0")["status"] == "not_affected"
+
+
+def test_unsupported_range_type_and_invalid_version_are_unknown():
+    unsupported = _range_advisory([{"introduced": "0"}, {"fixed": "1.0.0"}], range_type="GIT")
+    malformed_version = _range_advisory([{"introduced": "0"}, {"fixed": "1.0.0"}])
+    assert assess_version_affected_by_advisory(unsupported, "0.5.0")["status"] == "unknown"
+    assert assess_version_affected_by_advisory(malformed_version, "not-a-version")["status"] == "unknown"
+
+
+def test_semver_range_uses_semver_ordering_for_prereleases():
+    finding = _range_advisory(
+        [{"introduced": "1.0.0-beta.1"}, {"fixed": "1.0.0"}],
+        ecosystem="npm", range_type="SEMVER",
+    )
+    assert assess_version_affected_by_advisory(finding, "1.0.0-beta.2")["status"] == "affected"
+    assert assess_version_affected_by_advisory(finding, "1.0.0")["status"] == "not_affected"
 
 
 def test_npm_semver_fixed_target_comparison_handles_prereleases():

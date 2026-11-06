@@ -176,6 +176,29 @@ def test_review_graph_runs_ai_analysis_and_skips_comment_by_default(monkeypatch)
     assert "comment_url" not in result
 
 
+def test_review_graph_stores_ai_text_after_osv_contradiction_filtering(monkeypatch):
+    monkeypatch.setattr(
+        "vulnerability_agent.review_graph.review_dependabot_pull_request",
+        lambda *_args, **_kwargs: {
+            "status": "review_complete", "summary": {}, "source_usage": [],
+            "dependency_changes": [{"package": "langchain", "relationship": "direct"}],
+            "security_delta": {"introduced": [{"package": "langchain", "advisories": [{
+                "id": "GHSA-TEST", "version_assessment": {"status": "affected"},
+            }]}]},
+        },
+    )
+
+    class Model:
+        def invoke(self, _messages):
+            return SimpleNamespace(content="The installed langchain version is safe to use.")
+
+    result = build_dependabot_review_graph(model=Model()).invoke({
+        "repository": "/repo", "pull_request": "11", "post_comment": False,
+    })
+    assert "safe to use" not in result["report"]["ai_review"]
+    assert "safe to use" not in result["review_markdown"]
+
+
 def test_review_graph_preserves_evidence_when_model_fails(monkeypatch):
     monkeypatch.setattr(
         "vulnerability_agent.review_graph.review_dependabot_pull_request",
@@ -556,6 +579,8 @@ version = "2.0"
     assert len(records) == 3  # alpha/shared duplicate collapsed; beta/shared retained
     alpha_shared = next(item for item in records if item["package"] == "alpha" and item["id"] == "GHSA-shared")
     beta_shared = next(item for item in records if item["package"] == "beta")
+    assert alpha_shared["version_assessment"]["status"] == "affected"
+    assert beta_shared["version_assessment"]["status"] == "unknown"
     assert alpha_shared["finding_identity"] != beta_shared["finding_identity"]
     assert alpha_shared["severity"] == [{"type": "CVSS_V3", "score": "8.1"}]
     assert alpha_shared["affected_ranges"][0]["events"][-1]["fixed"] == "1.2"
