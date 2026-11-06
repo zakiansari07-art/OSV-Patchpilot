@@ -10,6 +10,9 @@ import pytest
 
 import main
 from vulnerability_agent import dependabot_review as review
+from vulnerability_agent.report_validation import (
+    EvidenceReportValidationError, evidence_report_json_schema, validate_evidence_report,
+)
 from vulnerability_agent.review_graph import (
     COMMENT_MARKER,
     build_dependabot_review_graph,
@@ -342,13 +345,19 @@ def test_review_runs_base_then_head_and_reports_osv_delta(tmp_path, monkeypatch)
     assert [path.name for path in seen_tests] == ["base", "head"]
     assert seen_usage[0][0] == seen_tests[1]
     assert seen_usage[0][1][0]["id"] == "GHSA-old"
-    assert result["schema_version"] == 3
+    assert result["schema_version"] == 4
     assert result["tests"]["base"]["passed"] is True
     assert result["tests"]["pr"]["passed"] is True
     assert result["files_changed"][0]["path"] == "requirements.txt"
     assert result["files_truncated"] is True
     assert result["summary"]["osv"]["resolved"] == 1
     assert result["summary"]["osv"]["unaffected"] == 0
+    assert result["summary"]["dependency_updates"] == [{
+        "package": "demo", "from": "1.0", "to": "2.0", "ecosystem": "pypi",
+        "relationship": "unknown", "dependency_paths": [],
+    }]
+    assert result["summary"]["dependency_analyses"][0]["relationship"] == "unknown"
+    assert result["validation"] == {"status": "passed", "schema_version": 4, "errors": [], "warnings": []}
     assert result["osv_scans"]["base"]["finding_count"] == 1
     resolved = result["security_delta"]["resolved"][0]
     assert (resolved["package"], resolved["ecosystem"], resolved["version"]) == ("demo", "PyPI", "1.0")
@@ -512,7 +521,7 @@ def test_compact_schema_serializes_complete_package_advisory_provenance():
         "security_delta": delta, "dependency_changes": [],
     })
     loaded = json.loads(json.dumps(report))
-    assert loaded["schema_version"] == 3
+    assert loaded["schema_version"] == 4
     advisory = loaded["security_delta"]["remaining"][0]["advisories"][0]
     assert advisory["finding_identity"] == "pypi:demo:ghsa-1"
     assert advisory["fixed_version_status"] == "unavailable"
@@ -545,13 +554,90 @@ def test_report_compaction_groups_advisories_and_limits_rag_locations():
             "retrieval": {"backend": "qdrant_local_hybrid"},
         }],
     })
-    assert report["schema_version"] == 3
+    assert report["schema_version"] == 4
     assert report["summary"]["osv"]["remaining"] == 6
     assert len(report["security_delta"]["remaining"]) == 1
     assert report["security_delta"]["remaining"][0]["advisory_count"] == 6
     assert len(report["source_usage"][0]["locations"]) == 3
     assert len(report["source_usage"][0]["locations"][0]["excerpt"]) == 240
+    assert report["source_usage"][0]["locations"][0]["evidence_classification"] == "semantic_context"
+    assert report["security_delta"]["count_semantics"]["unit"] == "package_advisory_records"
     assert "details" not in report["security_delta"]["remaining"][0]["advisories"][0]
+
+
+def test_report_validator_rejects_missing_dependency_summary_record():
+    finding = {"id": "GHSA-ONE", "package": "demo", "ecosystem": "PyPI", "version": "2.0",
+               "summary": "Finding", "aliases": []}
+    changed = {"package": "demo", "ecosystem": "pypi", "base_version": "1.0", "head_version": "2.0",
+               "relationship": "direct", "dependency_paths": [["demo"]]}
+    report = review._compact_review_report({
+        "mode": "dependabot_pr_review", "status": "review_complete", "repository_full_name": "acme/demo",
+        "pull_request": {"number": 1}, "files_changed": [],
+        "base": {"tests": {"passed": True, "returncode": 0, "output": "1 passed"},
+                 "security_scan": {"scan_status": "complete", "findings": []}},
+        "head": {"tests": {"passed": True, "returncode": 0, "output": "1 passed"},
+                 "security_scan": {"scan_status": "complete", "findings": [finding]}},
+        "test_comparison": review._compare_tests(
+            {"passed": True, "returncode": 0}, {"passed": True, "returncode": 0}),
+        "dependency_changes": [changed],
+        "security_delta": {"resolved": [], "introduced": [finding], "remaining": [], "unaffected": [], "not_assessed": []},
+    })
+    report["summary"]["dependency_updates"] = []
+    with pytest.raises(EvidenceReportValidationError, match="summary.dependency_updates"):
+        validate_evidence_report(report)
+
+
+def test_pr_comment_uses_detailed_dependency_data_and_preserves_evidence_label():
+    body = render_pr_comment({
+        "dependency_changes": [{"package": "demo", "ecosystem": "pypi", "base_version": "1.0",
+                                "head_version": "2.0", "relationship": "transitive"}],
+        "summary": {"dependency_updates": [{"package": "missing-summary-entry", "from": "?", "to": "?"}],
+                    "tests": {"base": {"passed": True, "summary": "passed"},
+                              "pr": {"passed": True, "summary": "passed"}},
+                    "osv": {"resolved": 0, "introduced": 0, "remaining": 0}},
+        "source_usage": [{"package": "demo", "ecosystem": "pypi", "locations": [{
+            "path": "src/demo.py", "line_start": 3, "line_end": 3, "area": "application",
+            "evidence_classification": "direct_import",
+        }]}],
+    }, "")
+    assert "`demo`: `1.0` → `2.0` (pypi; transitive)" in body
+    assert "missing-summary-entry" not in body
+    assert "direct_import" in body
+    assert "package-advisory records" in body
+    no_changes = render_pr_comment({
+        "dependency_changes": [],
+        "summary": {"dependency_updates": [{"package": "stale-summary-entry", "from": "1", "to": "2"}]},
+    }, "")
+    assert "No dependency change was identified." in no_changes
+    assert "stale-summary-entry" not in no_changes
+
+
+def test_report_v4_json_schema_and_per_dependency_source_statuses():
+    schema = evidence_report_json_schema()
+    assert schema["properties"]["schema_version"]["const"] == 4
+    changes = [
+        {"package": name, "ecosystem": "pypi", "base_version": "1.0", "head_version": "2.0",
+         "relationship": relation, "dependency_paths": [[name]]}
+        for name, relation in (("alpha", "direct"), ("beta", "transitive"))
+    ]
+    report = review._compact_review_report({
+        "mode": "dependabot_pr_review", "status": "review_complete", "repository_full_name": "acme/demo",
+        "pull_request": {"number": 2}, "files_changed": [], "dependency_changes": changes,
+        "source_usage_status": "completed_with_matches",
+        "source_usage": [{"package": "alpha", "ecosystem": "pypi", "relationship": "direct",
+                          "advisory_ids": [], "locations": [{
+                              "path": "src/alpha.py", "line_start": 1, "line_end": 1,
+                              "evidence_classification": "direct_import",
+                          }]}],
+        "base": {"tests": {"passed": True, "returncode": 0},
+                 "security_scan": {"scan_status": "complete", "findings": [], "unresolved_packages": []}},
+        "head": {"tests": {"passed": True, "returncode": 0},
+                 "security_scan": {"scan_status": "complete", "findings": [], "unresolved_packages": []}},
+        "security_delta": {"resolved": [], "introduced": [], "remaining": [], "unaffected": [], "not_assessed": []},
+    })
+    statuses = {item["package"]: item["source_analysis_status"] for item in report["summary"]["dependency_analyses"]}
+    assert statuses == {"alpha": "completed_with_matches", "beta": "completed_without_matches"}
+    assert validate_evidence_report(report) is report
 
 
 def test_pr_comment_is_compact_and_links_full_report_artifact():
