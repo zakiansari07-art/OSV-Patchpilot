@@ -186,9 +186,21 @@ def test_validation_rejects_missing_identifiers_and_invalid_enum_values(mutator,
 
 def test_published_json_schema_is_machine_readable_and_requires_core_fields():
     schema = evidence_report_json_schema()
-    assert schema["properties"]["schema_version"]["const"] == 3
+    assert schema["properties"]["schema_version"]["const"] == 4
     assert {"schema_version", "mode", "status", "summary", "pull_request", "security_delta"} <= set(schema["required"])
     json.dumps(schema)
+
+
+def test_schema_v4_accepts_new_source_areas_while_v3_contract_remains_strict():
+    report = load_report("weak_rag_evidence")
+    location = report["source_usage"][0]["locations"][0]
+    report["schema_version"] = 4
+    location["area"] = "configuration"
+    assert validate_evidence_report(report) is report
+
+    report["schema_version"] = 3
+    with pytest.raises(EvidenceReportValidationError, match="v4 area classifications"):
+        validate_evidence_report(report)
 
 
 def test_pr10_sendgrid_report_regression_uses_precise_counts_release_evidence_and_unknowns():

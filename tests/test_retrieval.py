@@ -10,11 +10,14 @@ import pytest
 from vulnerability_agent.retrieval import (
     LocalCodeRetriever,
     _trace_locations,
+    _query_import_roots,
     bm25_rank,
+    classify_file_role,
     chunk_source,
     reciprocal_rank_fusion,
     render_context,
 )
+from vulnerability_agent.retrieval_eval import evaluate_rankings, evaluate_retriever
 from vulnerability_agent.dependencies import AgentDependencies
 from vulnerability_agent.nodes import patching, usage_analysis
 
@@ -84,6 +87,57 @@ def test_code_chunker_rejects_sensitive_and_non_code_paths():
     assert chunk_source(".env.py", "SECRET = 'value'") == []
     assert chunk_source("credentials/client.py", "def fetch(): pass") == []
     assert chunk_source("src/package-lock.json", '{"name": "demo"}') == []
+
+
+def test_file_roles_distinguish_production_tests_and_documentation():
+    assert classify_file_role("src/client.py") == "production"
+    assert classify_file_role("tests/test_client.py") == "test"
+    assert classify_file_role("docs/usage.md") == "docs"
+
+
+def test_package_query_normalizes_language_import_aliases():
+    assert "git" in _query_import_roots("GitPython advisory details")
+    assert "qdrant_client" in _query_import_roots("qdrant-client client pooling issue")
+
+
+def test_retrieval_metrics_score_labelled_locations_and_skip_empty_recall_denominators():
+    examples = [
+        {"relevant": {"src/a.py:1-4"}},
+        {"relevant": set()},
+    ]
+    metrics = evaluate_rankings(
+        examples,
+        [["src/a.py:1-4", "src/b.py:1-3"], ["src/c.py:1-2"]],
+    )
+    assert metrics == {
+        "k": 5, "queries": 2, "precision_at_k": 0.1,
+        "recall_at_k": 1.0, "recall_queries_scored": 1, "mrr": 0.5,
+    }
+
+
+def test_evaluator_runs_queries_and_matches_overlapping_source_spans():
+    class Retriever:
+        def retrieve(self, _repository, _query, *, limit):
+            assert limit == 5
+            return [
+                {"path": "src/client.py", "line_start": 8, "line_end": 15},
+                {"path": "tests/test_client.py", "line_start": 1, "line_end": 4},
+            ]
+
+    result = evaluate_retriever(Retriever(), "/repo", [{
+        "query": "client package usage", "relevant": ["src/client.py:10-12"],
+    }])
+    assert result["precision_at_k"] == 0.2
+    assert result["recall_at_k"] == 1.0
+    assert result["mrr"] == 1.0
+
+
+def test_evaluation_fixture_uses_repository_locations_and_records_missing_sendgrid_example():
+    fixture = json.loads(Path(__file__).parent.joinpath("fixtures/retrieval_eval.json").read_text())
+    assert fixture["examples"][0]["relevant"] == ["vulnerability_agent/retrieval.py:380-385"]
+    false_positive = fixture["examples"][1]["known_false_positive_example"]
+    assert false_positive["location"] == "tests/test_agent.py:167-204"
+    assert false_positive["included_in_scored_corpus"] is False
 
 
 def test_source_candidates_accept_filesystem_server_root_object(tmp_path, monkeypatch):
@@ -188,6 +242,17 @@ def test_python_explicit_import_is_classified_as_direct_import(monkeypatch):
     assert location["line_start"] == location["line_end"] == 1
 
 
+def test_gitpython_distribution_maps_to_git_import_root(monkeypatch):
+    monkeypatch.setattr(usage_analysis.subprocess, "run", lambda *_args, **_kwargs: SimpleNamespace(
+        returncode=1, stdout="", stderr="",
+    ))
+    location = usage_analysis._explicit_locations(
+        "GitPython", {"src/repository.py": "import git\nrepo = git.Repo('.')\n"}, Path("/repo"),
+    )[0]
+    assert location["evidence_classification"] == "direct_import"
+    assert location["excerpt"] == "import git"
+
+
 def test_package_reference_in_configuration_is_classified(monkeypatch, tmp_path):
     monkeypatch.setattr(usage_analysis.subprocess, "run", lambda *_args, **_kwargs: SimpleNamespace(
         returncode=0, stdout="pyproject.toml:8:aiohttp = '^3.9'\n", stderr="",
@@ -196,6 +261,16 @@ def test_package_reference_in_configuration_is_classified(monkeypatch, tmp_path)
     assert locations[0]["evidence_classification"] == "package_reference"
     assert locations[0]["path"] == "pyproject.toml"
     assert locations[0]["line_start"] == 8
+
+
+def test_explicit_documentation_mention_is_separate_from_source_usage(monkeypatch, tmp_path):
+    monkeypatch.setattr(usage_analysis.subprocess, "run", lambda *_args, **_kwargs: SimpleNamespace(
+        returncode=0, stdout="README.md:12:This integration uses GitPython for repository access.\n", stderr="",
+    ))
+    locations = usage_analysis._documentation_references(tmp_path, "GitPython")
+    assert locations[0]["path"] == "README.md"
+    assert locations[0]["evidence_classification"] == "package_reference"
+    assert locations[0]["match_type"] == "literal documentation reference"
 
 
 def test_semantic_retrieval_is_labeled_context_not_package_usage(monkeypatch, tmp_path):
@@ -331,6 +406,8 @@ def fetch_data(url):
     assert indexed_count >= 2
     assert results
     assert results[0]["path"] == "src/client.py"
+    assert results[0]["file_role"] == "production"
+    assert "requests" in results[0]["import_roots"]
 
     reopened = LocalCodeRetriever(storage, embedder=FakeEmbedder())
     persisted_results = reopened.retrieve(repository, "requests fetch_data", limit=3)

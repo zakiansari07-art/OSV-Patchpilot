@@ -345,7 +345,7 @@ def test_review_runs_base_then_head_and_reports_osv_delta(tmp_path, monkeypatch)
     assert [path.name for path in seen_tests] == ["base", "head"]
     assert seen_usage[0][0] == seen_tests[1]
     assert seen_usage[0][1][0]["id"] == "GHSA-old"
-    assert result["schema_version"] == 3
+    assert result["schema_version"] == 4
     assert result["tests"]["base"]["passed"] is True
     assert result["tests"]["pr"]["passed"] is True
     assert result["files_changed"][0]["path"] == "requirements.txt"
@@ -393,6 +393,21 @@ def test_compacted_scan_preserves_package_ecosystem_for_report_validation():
         }],
     })
     assert scan["affected_packages"][0]["ecosystem"] == "PyPI"
+
+
+def test_compacted_source_usage_distinguishes_test_configuration_and_documentation_areas():
+    compacted = review._compact_source_usage([{
+        "package": "demo",
+        "locations": [
+            {"path": "tests/test_demo.py", "line_start": 1, "line_end": 2},
+            {"path": "pyproject.toml", "line_start": 4, "line_end": 4},
+            {"path": "docs/usage.md", "line_start": 8, "line_end": 9},
+            {"path": "src/demo.py", "line_start": 2, "line_end": 3},
+        ],
+    }])[0]["locations"]
+    assert [location["area"] for location in compacted] == [
+        "tests", "configuration", "documentation",
+    ]
 
 
 def test_unaffected_advisory_is_counted_once_across_base_and_pr_snapshots():
@@ -617,7 +632,7 @@ def test_compact_schema_serializes_complete_package_advisory_provenance():
         "security_delta": delta, "dependency_changes": [],
     })
     loaded = json.loads(json.dumps(report))
-    assert loaded["schema_version"] == 3
+    assert loaded["schema_version"] == 4
     advisory = loaded["security_delta"]["remaining"][0]["advisories"][0]
     assert advisory["finding_identity"] == "pypi:demo:ghsa-1"
     assert advisory["fixed_version_status"] == "unavailable"
@@ -650,7 +665,7 @@ def test_report_compaction_groups_advisories_and_limits_rag_locations():
             "retrieval": {"backend": "qdrant_local_hybrid"},
         }],
     })
-    assert report["schema_version"] == 3
+    assert report["schema_version"] == 4
     assert report["summary"]["osv"]["remaining"] == 6
     assert len(report["security_delta"]["remaining"]) == 1
     assert report["security_delta"]["remaining"][0]["advisory_count"] == 6

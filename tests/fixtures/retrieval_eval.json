@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "notes": "Labels refer to source locations inspected in this checkout. The requested tests/test_agent.py:167-204 SendGrid mock is a user-supplied known negative, but the file is absent from this checkout and therefore excluded from scored corpus locations.",
+  "examples": [
+    {
+      "id": "qdrant-python-client",
+      "query": "qdrant-client local repository retrieval implementation",
+      "relevant": ["vulnerability_agent/retrieval.py:380-385"],
+      "irrelevant": ["tests/test_dependabot_review.py:391-407"]
+    },
+    {
+      "id": "no-gitpython-usage",
+      "query": "GitPython production application import usage",
+      "relevant": [],
+      "irrelevant": ["tests/test_retrieval.py:245-253"],
+      "known_false_positive_example": {
+        "location": "tests/test_agent.py:167-204",
+        "description": "mocked SendGrid test; user-provided irrelevant example",
+        "included_in_scored_corpus": false
+      }
+    }
+  ]
+}
