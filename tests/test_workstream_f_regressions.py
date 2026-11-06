@@ -1,8 +1,7 @@
 """Offline regression contracts for Dependabot review evidence quality.
 
-Strict expected failures below document contracts that this branch does not
-yet implement. When the corresponding production behavior lands, remove the
-xfail marker so an accidental regression fails the suite.
+These tests exercise both the report contract and production code paths with
+local fixtures; none rely on external services.
 """
 from __future__ import annotations
 
@@ -76,7 +75,6 @@ def test_package_affected_version_range_boundaries_are_checked_offline():
     assert not is_version_affected_by_advisory(finding, "2.0.0")
 
 
-@pytest.mark.xfail(strict=True, reason="comparison currently keys findings by advisory ID, not reliable shared aliases")
 def test_two_advisory_ids_sharing_a_cve_remain_one_underlying_issue():
     before = [{"id": "GHSA-AAAA-BBBB-CCCC", "aliases": ["CVE-2025-12345"],
                "package": "demo", "ecosystem": "PyPI", "version": "1.0"}]
@@ -188,7 +186,6 @@ def test_source_report_retains_import_api_test_and_semantic_evidence_labels():
     assert labels == {"direct_import", "api_usage", "test_only"}
 
 
-@pytest.mark.xfail(strict=True, reason="source analysis has no AST-based deterministic import classifier on this branch")
 @pytest.mark.parametrize("source", [
     "import git\n",
     "import git as pygit\n",
@@ -216,12 +213,10 @@ def test_gitpython_distribution_import_variants_are_classified_as_direct_import(
     assert report["locations"][0]["evidence_classification"] == "direct_import"
 
 
-@pytest.mark.xfail(strict=True, reason="distribution-to-module mapping table omits GitPython -> git")
 def test_distribution_name_maps_to_import_module():
     assert "git" in usage_analysis._package_terms("GitPython")
 
 
-@pytest.mark.xfail(strict=True, reason="configuration files are excluded from source discovery")
 def test_configuration_only_package_reference_is_discoverable_as_configuration(tmp_path, monkeypatch):
     monkeypatch.setattr(usage_analysis.subprocess, "run", lambda *_args, **_kwargs: type(
         "Result", (), {"returncode": 0, "stdout": "pyproject.toml\0", "stderr": ""})())
@@ -242,8 +237,7 @@ def test_test_only_and_configuration_references_are_not_production_usage():
 
 
 @pytest.mark.parametrize("text,expected", [
-    pytest.param('mock.patch("git.Repo")', "test_only", marks=pytest.mark.xfail(
-        strict=True, reason="mocked dependency references are not classified as test-only by retrieval")),
+    ('mock.patch("git.Repo")', "test_only"),
     ("some unrelated but semantically similar handler", "semantic_context"),
     ("", "no_evidence"),
 ])
@@ -257,9 +251,8 @@ def test_mocked_semantic_and_absent_references_are_not_called_direct_usage(text,
     assert actual == expected
 
 
-@pytest.mark.xfail(strict=True, reason="report source usage currently drops advisory-specific reachability evidence")
 @pytest.mark.parametrize("usage_class,expected", [
-    ("api_usage", "established"),
+    ("api_usage", "unknown"),
     ("direct_import", "unknown"),
     ("no_evidence", "unknown"),
     ("semantic_context", "unknown"),
@@ -268,13 +261,22 @@ def test_vulnerability_reachability_requires_advisory_specific_api_evidence(usag
     compact, = review._compact_source_usage([{
         "package": "demo", "ecosystem": "PyPI", "advisory_ids": ["GHSA-TEST"],
         "application_usage_classifications": [usage_class],
-        "vulnerability_reachability": [{"advisory_id": "GHSA-TEST", "status": expected}],
         "locations": [],
     }])
     assert compact["vulnerability_reachability"] == [{"advisory_id": "GHSA-TEST", "status": expected}]
 
 
-@pytest.mark.xfail(strict=True, reason="schema v4 does not carry advisory-specific vulnerability_reachability")
+def test_explicit_advisory_specific_vulnerable_api_evidence_can_establish_reachability():
+    compact, = review._compact_source_usage([{
+        "package": "demo", "ecosystem": "PyPI", "advisory_ids": ["GHSA-TEST"],
+        "vulnerability_reachability": [{"advisory_id": "GHSA-TEST", "status": "established",
+                                         "evidence": "src/app.py:8 invokes the affected parser API"}],
+        "locations": [],
+    }])
+    assert compact["vulnerability_reachability"][0]["status"] == "established"
+    assert "affected parser API" in compact["vulnerability_reachability"][0]["evidence"]
+
+
 def test_report_represents_vulnerability_reachability_as_unknown_without_specific_evidence():
     report = review._compact_review_report({
         "mode": "dependabot_pr_review", "status": "review_complete", "repository_full_name": "acme/demo",
@@ -289,12 +291,18 @@ def test_report_represents_vulnerability_reachability_as_unknown_without_specifi
     validate_evidence_report(report)
 
 
-@pytest.mark.xfail(strict=True, reason="LLM text is appended without grounding validation against supplied evidence")
 def test_comment_does_not_publish_fabricated_source_claims_when_evidence_is_missing():
-    body = render_pr_comment({
+    report = {
         "dependency_changes": [], "summary": {"dependency_updates": [], "tests": {}, "osv": {}},
         "source_usage": [],
-    }, "The package is imported at src/secret.py:99 and its vulnerable API is reachable.")
+    }
+    body = render_pr_comment(report,
+        "The package is imported at src/secret.py:99 and its vulnerable API is reachable. "
+        "Passing tests prove all functionality is compatible. The whole repository is secure. "
+        "Upstream release notes prove application compatibility.")
     assert "src/secret.py" not in body
     assert "vulnerable API is reachable" not in body
+    assert "prove all functionality" not in body
+    assert "whole repository is secure" not in body
+    assert "release notes prove application compatibility" not in body
 

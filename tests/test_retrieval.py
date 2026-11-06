@@ -140,7 +140,8 @@ def test_zero_chunk_rag_index_uses_literal_fallback_for_report_only_locations(tm
     assert analysis["retrieval"]["backend"] == "qdrant_local_hybrid"
     assert analysis["retrieval"]["fallback"] == "literal package search"
     assert analysis["locations"][0]["path"] == "app.py"
-    assert analysis["locations"][0]["symbol"] == "text match"
+    assert analysis["locations"][0]["symbol"] == "import statement"
+    assert analysis["locations"][0]["evidence_classification"] == "direct_import"
     assert "render_report" in analysis["locations"][0]["excerpt"]
     assert "not prove" in analysis["note"]
 

@@ -367,6 +367,72 @@ def test_review_runs_base_then_head_and_reports_osv_delta(tmp_path, monkeypatch)
     assert github.get.call_count == 2
 
 
+@pytest.mark.parametrize(("osv_results", "source_fails"), [
+    ([{"scan_status": "complete", "findings": [], "unresolved_packages": []},
+      {"scan_status": "complete", "findings": [], "unresolved_packages": []}], False),
+    ([RuntimeError("OSV offline"), {"scan_status": "complete", "findings": [], "unresolved_packages": []}], False),
+    ([{"scan_status": "complete", "findings": [{"id": "GHSA-one", "package": "demo", "ecosystem": "PyPI", "version": "1"}], "unresolved_packages": []},
+      {"scan_status": "complete", "findings": [{"id": "GHSA-one", "package": "demo", "ecosystem": "PyPI", "version": "2"}], "unresolved_packages": []}], True),
+])
+def test_source_analysis_runs_independently_of_osv_and_preserves_other_results(tmp_path, monkeypatch, osv_results, source_fails):
+    repository = tmp_path / "repo"
+    repository.mkdir()
+    (repository / ".git").mkdir()
+    response = Mock()
+    response.json.return_value = {
+        "state": "open", "user": {"login": "dependabot[bot]"}, "html_url": "", "title": "Bump demo",
+        "base": {"ref": "main", "sha": "base"}, "head": {"ref": "dependabot/demo", "sha": "head"},
+        "changed_files": 1,
+    }
+    files = Mock()
+    files.json.return_value = [{"filename": "requirements.txt", "status": "modified", "patch": ""}]
+    github = Mock()
+    github.get.side_effect = [response, files]
+    scans = iter(osv_results)
+    analyzed = []
+
+    def fake_git(root, *args):
+        if args[:3] == ("remote", "get-url", "origin"):
+            return "https://github.com/acme/demo.git"
+        if args[0] == "rev-parse":
+            return {"refs/agent-review/2/base": "base", "refs/agent-review/2/head": "head"}[args[1]]
+        if args[:2] == ("worktree", "add"):
+            Path(args[-2]).mkdir(parents=True, exist_ok=True)
+        return ""
+
+    def scan(_root, _client):
+        result = next(scans)
+        if isinstance(result, Exception):
+            raise result
+        return result
+
+    monkeypatch.setattr(review, "_git", fake_git)
+    monkeypatch.setattr(review, "_test", lambda *_: {"passed": True, "returncode": 0, "output": "passed"})
+    monkeypatch.setattr(review, "_scan", scan)
+    monkeypatch.setattr(review, "_dependency_changes", lambda *_: [{
+        "package": "demo", "ecosystem": "pypi", "base_version": "1", "head_version": "2",
+        "relationship": "direct", "dependency_paths": [["demo"]],
+    }])
+
+    def source_analysis(_root, inputs):
+        analyzed.extend(inputs)
+        if source_fails:
+            raise RuntimeError("source analysis unavailable")
+        return [{"package": "demo", "ecosystem": "pypi", "locations": []}]
+
+    result = review.review_dependabot_pull_request(repository, "2", github_client=github, usage_analyzer=source_analysis)
+    assert any((item.get("package", {}).get("name") if isinstance(item.get("package"), dict) else item.get("package")) == "demo"
+               for item in analyzed)
+    expected_source_status = "failed" if source_fails else "completed_without_matches"
+    assert result["summary"]["dependency_analyses"][0]["source_analysis_status"] == expected_source_status
+    if isinstance(osv_results[0], Exception):
+        assert result["osv_scans"]["base"]["status"] == "failed"
+        assert result["summary"]["dependency_analyses"][0]["osv_status"] == "failed"
+    if source_fails:
+        assert result["summary"]["osv"]["remaining"] == 1
+        assert result["osv_scans"]["base"]["status"] == "complete"
+
+
 def test_actions_only_update_keeps_python_baseline_out_of_pr_delta():
     finding = {"id": "OSV-BASE", "package": "aiohttp", "version": "3.8.0", "ecosystem": "PyPI"}
     delta = review._pr_security_delta(
