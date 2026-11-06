@@ -186,7 +186,7 @@ def test_validation_rejects_missing_identifiers_and_invalid_enum_values(mutator,
 
 def test_published_json_schema_is_machine_readable_and_requires_core_fields():
     schema = evidence_report_json_schema()
-    assert schema["properties"]["schema_version"]["const"] == 4
+    assert schema["properties"]["schema_version"]["const"] == 5
     assert {"schema_version", "mode", "status", "summary", "pull_request", "security_delta"} <= set(schema["required"])
     json.dumps(schema)
 

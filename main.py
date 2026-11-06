@@ -688,6 +688,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                         "ecosystem": ecosystem,
                     },
                     "advisories": dependency.get("advisories", []),
+                    "relationship": dependency.get("relationship", "unknown"),
+                    "dependency_paths": dependency.get("dependency_paths", []),
                 }
                 result = node_report_source_usage({
                     "repo_path": str(head_repository), "main_repo_path": str(head_repository),

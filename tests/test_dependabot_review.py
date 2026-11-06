@@ -368,7 +368,7 @@ def test_review_runs_base_then_head_and_reports_osv_delta(tmp_path, monkeypatch)
     assert seen_usage[0][0] == seen_tests[1]
     assert seen_usage[0][1][0]["package"] == "demo"
     assert seen_usage[0][1][0]["advisories"][0]["id"] == "GHSA-old"
-    assert result["schema_version"] == 4
+    assert result["schema_version"] == 5
     assert result["tests"]["base"]["passed"] is True
     assert result["tests"]["pr"]["passed"] is True
     assert result["files_changed"][0]["path"] == "requirements.txt"
@@ -450,7 +450,9 @@ def test_zero_osv_findings_still_runs_source_analysis_for_changed_dependency(tmp
     assert calls[0]["advisories"] == []
     assert report["summary"]["dependency_analyses"] == [{
         "package": "demo", "ecosystem": "pypi", "base_version": "1.0", "head_version": "2.0",
-        "osv_status": "complete", "source_analysis_status": "completed_without_matches",
+        "osv_status": "complete", "dependency_relationship": "direct",
+        "source_analysis_status": "completed_without_matches",
+        "application_usage_classifications": ["no_evidence"], "vulnerability_reachability": [],
     }]
     assert report["summary"]["source_usage"]["retrieval_status"] == "completed_without_matches"
     comment = render_pr_comment(report, "")
@@ -494,6 +496,44 @@ def test_multiple_changed_dependencies_receive_independent_source_statuses(tmp_p
     statuses = {item["package"]: item["source_analysis_status"] for item in report["summary"]["dependency_analyses"]}
     assert statuses == {"alpha": "completed_with_matches", "beta": "completed_without_matches"}
     assert validate_evidence_report(report) is report
+
+
+def test_transitive_dependency_can_be_directly_imported_while_reachability_remains_unknown(tmp_path, monkeypatch):
+    changed = {"package": "langchain-core", "ecosystem": "pypi", "base_version": "0.3.0", "head_version": "0.3.1",
+               "relationship": "transitive", "dependency_paths": [["langchain", "langchain-core"]]}
+    finding = {"id": "GHSA-langchain", "package": "langchain-core", "ecosystem": "pypi",
+               "version": "0.3.1", "summary": "A vulnerable feature"}
+    report = _run_dependency_review(
+        tmp_path, monkeypatch, changes=[changed], scans=[_complete_scan(), _complete_scan([finding])],
+        usage_analyzer=lambda _head, _targets: [{
+            "package": "langchain-core", "ecosystem": "pypi", "locations": [{
+                "path": "src/agent.py", "line_start": 4, "line_end": 4,
+                "area": "application", "symbol": "import",
+                "evidence_classification": "direct_import", "match_type": "direct_import",
+            }],
+            "evidence_classification": "direct_import", "advisory_ids": ["GHSA-langchain"],
+        }],
+    )
+    analysis = report["summary"]["dependency_analyses"][0]
+
+    assert analysis["dependency_relationship"] == "transitive"
+    assert analysis["application_usage_classifications"] == ["direct_import"]
+    assert analysis["vulnerability_reachability"][0]["status"] == "unknown"
+    assert report["source_usage"][0]["dependency_relationship"] == "transitive"
+    assert report["source_usage"][0]["evidence_classification"] == "direct_import"
+    assert validate_evidence_report(report) is report
+    comment = render_pr_comment(report, "")
+    assert "dependency relationship transitive" in comment
+    assert "application usage evidence direct_import" in comment
+    assert "GHSA-langchain: unknown" in comment
+    prompt = render_review_prompt(report)
+    assert '"dependency_relationship": "transitive"' in prompt
+    assert '"status": "unknown"' in prompt
+    invalid = json.loads(json.dumps(report))
+    invalid["summary"]["dependency_analyses"][0]["vulnerability_reachability"][0]["status"] = "established"
+    invalid["source_usage"][0]["vulnerability_reachability"][0]["status"] = "established"
+    with pytest.raises(ValueError, match="requires specific source evidence"):
+        validate_evidence_report(invalid)
 
 
 def test_source_analysis_failure_preserves_osv_findings(tmp_path, monkeypatch):
@@ -806,7 +846,7 @@ def test_compact_schema_serializes_complete_package_advisory_provenance():
         "security_delta": delta, "dependency_changes": [],
     })
     loaded = json.loads(json.dumps(report))
-    assert loaded["schema_version"] == 4
+    assert loaded["schema_version"] == 5
     advisory = loaded["security_delta"]["remaining"][0]["advisories"][0]
     assert advisory["finding_identity"] == "pypi:demo:ghsa-1"
     assert advisory["fixed_version_status"] == "unavailable"
@@ -839,7 +879,7 @@ def test_report_compaction_groups_advisories_and_limits_rag_locations():
             "retrieval": {"backend": "qdrant_local_hybrid"},
         }],
     })
-    assert report["schema_version"] == 4
+    assert report["schema_version"] == 5
     assert report["summary"]["osv"]["remaining"] == 6
     assert len(report["security_delta"]["remaining"]) == 1
     assert report["security_delta"]["remaining"][0]["advisory_count"] == 6
