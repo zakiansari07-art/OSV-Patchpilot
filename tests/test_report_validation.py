@@ -203,6 +203,24 @@ def test_schema_v4_accepts_new_source_areas_while_v3_contract_remains_strict():
         validate_evidence_report(report)
 
 
+@pytest.mark.parametrize("classification", ["api_usage", "test_only", "configuration"])
+def test_schema_v4_preserves_explicit_rag_evidence_categories(classification):
+    report = load_report("weak_rag_evidence")
+    report["schema_version"] = 4
+    location = report["source_usage"][0]["locations"][0]
+    location.update({
+        "evidence_classification": classification,
+        "language": "python", "chunk_type": "declaration",
+        "function_name": "fetch", "class_name": None,
+        "production_code": classification == "api_usage",
+        "module_references": ["aiohttp"],
+    })
+    report["source_usage"][0]["evidence_classification"] = classification
+    validate_evidence_report(report)
+    comment = run_production_comment_path(report)
+    assert classification in comment
+
+
 def test_pr10_sendgrid_report_regression_uses_precise_counts_release_evidence_and_unknowns():
     report = load_report("pr10_sendgrid_report.json.gz")
     assert validate_evidence_report(report) is report

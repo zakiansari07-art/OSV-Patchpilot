@@ -1,6 +1,6 @@
 {
-  "version": 1,
-  "notes": "Labels refer to source locations inspected in this checkout. The requested tests/test_agent.py:167-204 SendGrid mock is a user-supplied known negative, but the file is absent from this checkout and therefore excluded from scored corpus locations.",
+  "version": 2,
+  "notes": "Repository labels are reviewed source spans. GitPython's production match is synthetic evaluation data to test the explicit GitPython-to-git mapping; the SendGrid mock is a known negative and must not be promoted as GitPython usage.",
   "examples": [
     {
       "id": "qdrant-python-client",
@@ -9,10 +9,14 @@
       "irrelevant": ["tests/test_dependabot_review.py:391-407"]
     },
     {
-      "id": "no-gitpython-usage",
+      "id": "gitpython-import-and-mocked-test",
       "query": "GitPython production application import usage",
-      "relevant": [],
-      "irrelevant": ["tests/test_retrieval.py:245-253"],
+      "relevant": ["src/repository.py:1-2"],
+      "irrelevant": ["tests/test_agent.py:167-204", "tests/test_retrieval.py:245-253"],
+      "synthetic_corpus": [
+        {"path": "src/repository.py", "content": "import git as gitlib\nrepo = gitlib.Repo('.')\n"},
+        {"path": "tests/test_agent.py", "content": "from unittest.mock import Mock\n# mocked SendGrid sender test\n"}
+      ],
       "known_false_positive_example": {
         "location": "tests/test_agent.py:167-204",
         "description": "mocked SendGrid test; user-provided irrelevant example",

@@ -11,6 +11,7 @@ from vulnerability_agent.retrieval import (
     LocalCodeRetriever,
     _trace_locations,
     _query_import_roots,
+    _python_import_references,
     bm25_rank,
     classify_file_role,
     chunk_source,
@@ -65,10 +66,12 @@ def unrelated():
 
     chunks = chunk_source("src/client.py", source)
 
-    assert [chunk["symbol"] for chunk in chunks] == ["fetch_data", "unrelated"]
-    assert chunks[0]["line_start"] == 3
-    assert chunks[0]["line_end"] == 5
-    assert "requests.get" in chunks[0]["content"]
+    function_chunks = [chunk for chunk in chunks if chunk["chunk_type"] == "declaration"]
+    assert [chunk["symbol"] for chunk in function_chunks] == ["fetch_data", "unrelated"]
+    assert function_chunks[0]["line_start"] == 3
+    assert function_chunks[0]["line_end"] == 5
+    assert "requests.get" in function_chunks[0]["content"]
+    assert any(chunk["chunk_type"] == "import_statement" for chunk in chunks)
 
 
 def test_javascript_chunking_preserves_common_declaration_boundaries():
@@ -98,6 +101,17 @@ def test_file_roles_distinguish_production_tests_and_documentation():
 def test_package_query_normalizes_language_import_aliases():
     assert "git" in _query_import_roots("GitPython advisory details")
     assert "qdrant_client" in _query_import_roots("qdrant-client client pooling issue")
+
+
+def test_python_import_analysis_preserves_aliases_modules_and_source_lines():
+    refs = _python_import_references(
+        "import git.repo as repository_module\nfrom git import Repo as Repository\n"
+    )
+    assert [(item["module"], item["binding"], item["alias"], item["line"])
+            for item in refs] == [
+        ("git.repo", "repository_module", "repository_module", 1),
+        ("git.Repo", "Repository", "Repository", 2),
+    ]
 
 
 def test_retrieval_metrics_score_labelled_locations_and_skip_empty_recall_denominators():
@@ -224,9 +238,10 @@ def test_zero_chunk_rag_index_uses_literal_fallback_for_report_only_locations(tm
     assert analysis["retrieval"]["backend"] == "qdrant_local_hybrid"
     assert "fallback" not in analysis["retrieval"]
     assert analysis["locations"][0]["path"] == "app.py"
-    assert analysis["locations"][0]["symbol"] == "import"
-    assert analysis["locations"][0]["evidence_classification"] == "direct_import"
-    assert "from demo import render_report" in analysis["locations"][0]["excerpt"]
+    direct_import = next(item for item in analysis["locations"] if item["evidence_classification"] == "direct_import")
+    assert direct_import["symbol"] == "import"
+    assert "from demo import render_report" in direct_import["excerpt"]
+    assert analysis["locations"][0]["evidence_classification"] == "api_usage"
     assert "not prove" in analysis["note"]
 
 
@@ -237,9 +252,13 @@ def test_python_explicit_import_is_classified_as_direct_import(monkeypatch):
     location = usage_analysis._explicit_locations(
         "aiohttp", {"src/client.py": "import aiohttp\n\ndef fetch():\n    return aiohttp.get('/')\n"}, Path("/repo"),
     )[0]
-    assert location["evidence_classification"] == "direct_import"
+    assert location["evidence_classification"] == "api_usage"
     assert location["path"] == "src/client.py"
-    assert location["line_start"] == location["line_end"] == 1
+    assert location["line_start"] == location["line_end"] == 4
+    direct_import = next(item for item in usage_analysis._explicit_locations(
+        "aiohttp", {"src/client.py": "import aiohttp\n\ndef fetch():\n    return aiohttp.get('/')\n"}, Path("/repo"),
+    ) if item["evidence_classification"] == "direct_import")
+    assert direct_import["line_start"] == direct_import["line_end"] == 1
 
 
 def test_gitpython_distribution_maps_to_git_import_root(monkeypatch):
@@ -249,8 +268,21 @@ def test_gitpython_distribution_maps_to_git_import_root(monkeypatch):
     location = usage_analysis._explicit_locations(
         "GitPython", {"src/repository.py": "import git\nrepo = git.Repo('.')\n"}, Path("/repo"),
     )[0]
-    assert location["evidence_classification"] == "direct_import"
+    assert location["evidence_classification"] == "api_usage"
+    location = next(item for item in usage_analysis._explicit_locations(
+        "GitPython", {"src/repository.py": "import git\nrepo = git.Repo('.')\n"}, Path("/repo"),
+    ) if item["evidence_classification"] == "direct_import")
     assert location["excerpt"] == "import git"
+
+
+def test_alias_import_and_api_call_are_separate_evidence(monkeypatch):
+    monkeypatch.setattr(usage_analysis.subprocess, "run", lambda *_args, **_kwargs: SimpleNamespace(
+        returncode=1, stdout="", stderr="",
+    ))
+    locations = usage_analysis._explicit_locations(
+        "GitPython", {"src/repository.py": "import git as gitlib\nrepo = gitlib.Repo('.')\n"}, Path("/repo"),
+    )
+    assert [item["evidence_classification"] for item in locations] == ["api_usage", "direct_import"]
 
 
 def test_package_reference_in_configuration_is_classified(monkeypatch, tmp_path):
@@ -258,7 +290,7 @@ def test_package_reference_in_configuration_is_classified(monkeypatch, tmp_path)
         returncode=0, stdout="pyproject.toml:8:aiohttp = '^3.9'\n", stderr="",
     ))
     locations = usage_analysis._configuration_references(tmp_path, "aiohttp")
-    assert locations[0]["evidence_classification"] == "package_reference"
+    assert locations[0]["evidence_classification"] == "configuration"
     assert locations[0]["path"] == "pyproject.toml"
     assert locations[0]["line_start"] == 8
 
@@ -269,7 +301,7 @@ def test_explicit_documentation_mention_is_separate_from_source_usage(monkeypatc
     ))
     locations = usage_analysis._documentation_references(tmp_path, "GitPython")
     assert locations[0]["path"] == "README.md"
-    assert locations[0]["evidence_classification"] == "package_reference"
+    assert locations[0]["evidence_classification"] == "semantic_context"
     assert locations[0]["match_type"] == "literal documentation reference"
 
 
@@ -408,11 +440,52 @@ def fetch_data(url):
     assert results[0]["path"] == "src/client.py"
     assert results[0]["file_role"] == "production"
     assert "requests" in results[0]["import_roots"]
+    assert results[0]["file_role"] == "production"
+    assert results[0]["chunk_type"] in {"import_statement", "declaration"}
+    assert results[0]["language"] == "python"
+    assert results[0]["module_references"] == ["requests"]
 
     reopened = LocalCodeRetriever(storage, embedder=FakeEmbedder())
     persisted_results = reopened.retrieve(repository, "requests fetch_data", limit=3)
     reopened.client.close()
     assert persisted_results[0]["path"] == "src/client.py"
+
+
+def test_gitpython_alias_retrieval_prefers_production_evidence_over_mock_test(tmp_path):
+    pytest.importorskip("qdrant_client")
+    repository = tmp_path / "demo-repo"
+    repository.mkdir()
+    retriever = LocalCodeRetriever(tmp_path / "qdrant", embedder=FakeEmbedder())
+    retriever.index_sources(repository, {
+        "src/repository.py": "import git as gitlib\ndef open_repo(path):\n    return gitlib.Repo(path)\n",
+        "tests/test_agent.py": "def test_sendgrid_sender():\n    mocked_sendgrid = Mock()\n    return mocked_sendgrid.send('hello')\n",
+    })
+
+    results = retriever.retrieve(repository, "GitPython repository", limit=5)
+    retriever.client.close()
+
+    assert results
+    assert results[0]["path"] == "src/repository.py"
+    assert all(item["path"] != "tests/test_agent.py" for item in results)
+    assert results[0]["module_references"] == ["git"]
+    assert results[0]["production_code"] is True
+
+
+def test_gitpython_retrieval_evaluation_covers_positive_and_known_negative(tmp_path):
+    pytest.importorskip("qdrant_client")
+    fixture = json.loads(Path(__file__).parent.joinpath("fixtures/retrieval_eval.json").read_text())
+    example = fixture["examples"][1]
+    repository = tmp_path / "synthetic-repo"
+    repository.mkdir()
+    sources = {item["path"]: item["content"] for item in example["synthetic_corpus"]}
+    retriever = LocalCodeRetriever(tmp_path / "qdrant", embedder=FakeEmbedder())
+    retriever.index_sources(repository, sources)
+
+    metrics = evaluate_retriever(retriever, repository, [example], k=5)
+
+    retriever.client.close()
+    assert metrics["recall_at_k"] == 1.0
+    assert metrics["mrr"] == 1.0
 
 
 def test_patch_planner_does_not_retrieve_or_prompt_with_source_context(tmp_path):
