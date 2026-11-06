@@ -5,6 +5,7 @@ local fixtures; none rely on external services.
 """
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -12,7 +13,7 @@ import pytest
 from vulnerability_agent import dependabot_review as review
 from vulnerability_agent.nodes import usage_analysis
 from vulnerability_agent.report_validation import EvidenceReportValidationError, validate_evidence_report
-from vulnerability_agent.review_graph import render_pr_comment, render_review_prompt
+from vulnerability_agent.review_graph import _sanitize_ai_review, render_pr_comment, render_review_prompt
 
 
 def _scan(findings):
@@ -48,6 +49,46 @@ def test_different_advisories_on_one_package_are_not_merged():
     grouped = review._compact_advisory_groups(delta["remaining"])
     assert len(grouped) == 1
     assert grouped[0]["advisory_count"] == 2
+
+
+def test_remaining_alias_records_assess_pr_version_and_preserve_base_assessment():
+    def record(advisory_id, version):
+        return {
+            "id": advisory_id, "package": "langchain", "ecosystem": "PyPI", "version": version,
+            "aliases": ["CVE-2026-12345"], "affected_ranges": [{"type": "ECOSYSTEM", "events": [
+                {"introduced": "0"}, {"fixed": "0.3.30"},
+            ]}], "affected_versions": [],
+        }
+
+    before = [record("GHSA-3644-Q5CJ-C5C7", "0.2.16"), record("PYSEC-2026-2555", "0.2.16")]
+    after = [record("GHSA-3644-Q5CJ-C5C7", "0.2.17"), record("PYSEC-2026-2555", "0.2.17")]
+    delta = review._pr_security_delta(_scan(before), _scan(after), _changed("langchain"), scan_scope_changed=True)
+
+    assert {item["id"] for item in delta["remaining"]} == {"GHSA-3644-Q5CJ-C5C7", "PYSEC-2026-2555"}
+    assert {item["version_assessment"]["installed_version"] for item in delta["remaining"]} == {"0.2.17"}
+    assert {item["base_version_assessment"]["installed_version"] for item in delta["remaining"]} == {"0.2.16"}
+    compact, = review._compact_advisory_groups(delta["remaining"])
+    assert compact["installed_version"] == compact["head_version"] == "0.2.17"
+    assert compact["base_version"] == "0.2.16"
+    assert {item["version_assessment"]["installed_version"] for item in compact["advisories"]} == {"0.2.17"}
+    report = review._compact_review_report({
+        "mode": "dependabot_pr_review", "status": "review_complete", "repository_full_name": "acme/demo",
+        "pull_request": {"number": 11}, "files_changed": [],
+        "dependency_changes": [{"package": "langchain", "ecosystem": "pypi", "base_version": "0.2.16",
+                                "head_version": "0.2.17", "relationship": "direct", "dependency_paths": [["langchain"]]}],
+        "source_usage_status": "completed_without_matches", "source_usage": [],
+        "base": {"tests": {"passed": True}, "security_scan": _scan(before)},
+        "head": {"tests": {"passed": True}, "security_scan": _scan(after)},
+        "security_delta": delta,
+    })
+    persisted, = report["security_delta"]["remaining"]
+    assert persisted["installed_version"] == persisted["head_version"] == "0.2.17"
+    assert {item["version_assessment"]["installed_version"] for item in persisted["advisories"]} == {"0.2.17"}
+    assert {item["base_version_assessment"]["installed_version"] for item in persisted["advisories"]} == {"0.2.16"}
+    invalid_report = json.loads(json.dumps(report))
+    invalid_report["security_delta"]["remaining"][0]["advisories"][0]["version_assessment"]["installed_version"] = "0.2.16"
+    with pytest.raises(EvidenceReportValidationError, match="assessment version disagrees"):
+        validate_evidence_report(invalid_report)
 
 
 def test_alias_grouping_counts_underlying_issues_without_discarding_records():
@@ -315,6 +356,18 @@ def test_mocked_semantic_and_absent_references_are_not_called_direct_usage(text,
     assert actual == expected
 
 
+def test_package_evidence_label_is_derived_from_traceable_import_locations():
+    compact, = review._compact_source_usage([{
+        "package": "langchain-core", "ecosystem": "pypi", "evidence_classification": "no_evidence",
+        "application_usage_classifications": ["direct_import"],
+        "locations": [{"path": "src/agent.py", "line_start": 4, "line_end": 4,
+                       "excerpt": "from langchain_core import messages",
+                       "evidence_classification": "direct_import"}],
+    }])
+    assert compact["evidence_classification"] == "direct_import"
+    assert compact["application_usage_classifications"] == ["direct_import"]
+
+
 @pytest.mark.parametrize("usage_class,expected", [
     ("api_usage", "unknown"),
     ("direct_import", "unknown"),
@@ -448,11 +501,29 @@ def test_recommendation_includes_version_guidance_usage_and_unknown_reachability
     assert "deterministic affected installed version" in recommendation
     assert "Test evidence: base passed, PR passed" in recommendation
     assert "passing tests do not change the OSV affected-version assessment" in recommendation
+    assert "langchain-core 0.2.41 (1 advisory record(s))" in recommendation
     comment = render_pr_comment(
         report,
         "The langchain-core 0.2.41 version is not vulnerable and is safe to merge.",
     )
     assert "Deterministic installed-version assessment" in comment
-    assert "remaining: 1 affected" in comment
+    assert "remaining (PR snapshot): 1 affected" in comment
     assert "not vulnerable and is safe to merge" not in comment
+
+
+def test_ai_narrative_cannot_attribute_global_remaining_count_to_one_package():
+    report = {
+        "security_delta": {
+            "counts": {"remaining": 16},
+            "remaining": [
+                {"package": "langchain", "advisory_count": 4, "advisories": []},
+                {"package": "langchain-core", "advisory_count": 12, "advisories": []},
+            ],
+        },
+    }
+    misleading = "There are 16 remaining advisory records indicating that langchain 0.2.17 is affected."
+    corrected = "There are 16 remaining advisory records across langchain and langchain-core."
+
+    assert _sanitize_ai_review(report, misleading) == ""
+    assert _sanitize_ai_review(report, corrected) == corrected
 
