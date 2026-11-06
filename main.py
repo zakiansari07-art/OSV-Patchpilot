@@ -73,6 +73,37 @@ def _elapsed_label(seconds: float) -> str:
     return f"{minutes:02d}:{remainder:02d}"
 
 
+def _group_source_analysis_inputs(findings: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Group OSV records while keeping no-advisory source queries distinct."""
+    from osv_service import group_advisories_by_package
+
+    osv_findings = []
+    source_only_groups = []
+    for item in findings:
+        package = item.get("package", {})
+        if isinstance(package, dict):
+            package_data = {
+                "name": str(package.get("name", "")),
+                "version": str(package.get("version", item.get("version", ""))),
+                "ecosystem": str(package.get("ecosystem", item.get("ecosystem", "PyPI"))),
+            }
+        else:
+            package_data = {
+                "name": str(package), "version": str(item.get("version", "")),
+                "ecosystem": str(item.get("ecosystem", "PyPI")),
+            }
+        if str(item.get("id", "")).startswith("source-analysis:"):
+            source_only_groups.append({
+                "id": str(item["id"]), "package": package_data,
+                "advisories": [], "advisory_ids": [],
+                "relationship": item.get("relationship", "unknown"),
+                "dependency_paths": item.get("dependency_paths", []),
+            })
+        else:
+            osv_findings.append({**item, "package": package_data})
+    return group_advisories_by_package(osv_findings) + source_only_groups
+
+
 def _progress(message: str, started_at: float) -> None:
     """Write human-readable status to stderr, preserving JSON stdout."""
     print(f"[{_elapsed_label(time.monotonic() - started_at)}] {message}", file=sys.stderr, flush=True)
@@ -668,14 +699,10 @@ def main(argv: Sequence[str] | None = None) -> int:
                 return []
             from vulnerability_agent.dependencies import create_dependencies
             from vulnerability_agent.nodes.usage_analysis import node_report_source_usage
-            from osv_service import group_advisories_by_package
 
             dependencies = create_dependencies(audit_database_path=state_database, run_id=f"dependabot-review-{uuid.uuid4().hex}")
             analyses: list[dict[str, Any]] = []
-            for group in group_advisories_by_package([
-                {**item, "package": {"name": item.get("package", ""), "version": item.get("version", ""), "ecosystem": item.get("ecosystem", "PyPI")}}
-                for item in findings
-            ]):
+            for group in _group_source_analysis_inputs(findings):
                 result = node_report_source_usage({
                     "repo_path": str(head_repository), "main_repo_path": str(head_repository),
                     "current_vuln": group,

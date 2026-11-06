@@ -12,7 +12,7 @@ import pytest
 from vulnerability_agent import dependabot_review as review
 from vulnerability_agent.nodes import usage_analysis
 from vulnerability_agent.report_validation import EvidenceReportValidationError, validate_evidence_report
-from vulnerability_agent.review_graph import render_pr_comment
+from vulnerability_agent.review_graph import render_pr_comment, render_review_prompt
 
 
 def _scan(findings):
@@ -48,6 +48,57 @@ def test_different_advisories_on_one_package_are_not_merged():
     grouped = review._compact_advisory_groups(delta["remaining"])
     assert len(grouped) == 1
     assert grouped[0]["advisory_count"] == 2
+
+
+def test_alias_grouping_counts_underlying_issues_without_discarding_records():
+    findings = [
+        {"id": "GHSA-AAAA-BBBB-CCCC", "aliases": ["CVE-2025-12345", "PYSEC-2025-100"],
+         "package": "alpha", "ecosystem": "PyPI"},
+        {"id": "PYSEC-2025-100", "aliases": ["CVE-2025-12345"],
+         "package": "beta", "ecosystem": "PyPI"},
+        {"id": "OSV-LOCAL-1", "aliases": ["unreliable-alias"],
+         "package": "gamma", "ecosystem": "PyPI"},
+    ]
+    summary = review._underlying_vulnerability_summary(findings)
+
+    assert summary["known_unique_count"] == 1
+    assert summary["unknown_identity_record_count"] == 1
+    assert summary["groups"][0]["advisory_ids"] == ["GHSA-AAAA-BBBB-CCCC", "PYSEC-2025-100"]
+    assert summary["groups"][0]["packages"] == ["alpha", "beta"]
+
+
+def test_json_report_separates_advisory_records_from_underlying_vulnerability_count():
+    base_finding = {"id": "GHSA-AAAA-BBBB-CCCC", "aliases": ["CVE-2025-12345"],
+                    "package": "demo", "ecosystem": "PyPI", "version": "1.0"}
+    head_finding = {"id": "PYSEC-2025-123", "aliases": ["CVE-2025-12345"],
+                    "package": "demo", "ecosystem": "PyPI", "version": "2.0"}
+    delta = review._pr_security_delta(_scan([base_finding]), _scan([head_finding]), _changed(), scan_scope_changed=True)
+    report = review._compact_review_report({
+        "mode": "dependabot_pr_review", "status": "review_complete", "repository_full_name": "acme/demo",
+        "pull_request": {"number": 4}, "files_changed": [], "dependency_changes": _changed(),
+        "base": {"tests": {"passed": True}, "security_scan": _scan([base_finding])},
+        "head": {"tests": {"passed": True}, "security_scan": _scan([head_finding])},
+        "security_delta": delta,
+    })
+
+    assert report["security_delta"]["counts"]["remaining"] == 2
+    group, = report["security_delta"]["remaining"]
+    assert group["advisory_count"] == 2
+    assert {item["id"] for item in group["advisories"]} == {"GHSA-AAAA-BBBB-CCCC", "PYSEC-2025-123"}
+    semantic = report["security_delta"]["count_semantics"]["underlying_vulnerabilities"]["remaining"]
+    assert semantic["known_unique_count"] == 1
+    assert semantic["groups"][0]["identity"] == "CVE-2025-12345"
+
+
+def test_unverified_shared_alias_does_not_merge_osv_classifications():
+    delta = review._pr_security_delta(
+        _scan([{"id": "OSV-OLD", "aliases": ["not-a-real-alias"], "package": "demo", "ecosystem": "PyPI", "version": "1"}]),
+        _scan([{"id": "OSV-NEW", "aliases": ["not-a-real-alias"], "package": "demo", "ecosystem": "PyPI", "version": "2"}]),
+        _changed(), scan_scope_changed=True,
+    )
+    assert len(delta["resolved"]) == 1
+    assert len(delta["introduced"]) == 1
+    assert delta["remaining"] == []
 
 
 def test_unknown_aliases_are_preserved_without_inventing_alias_identity():
@@ -151,7 +202,20 @@ def test_transitive_dependency_usage_evidence_stays_separate_from_relationship()
     assert dependency["relationship"] == "transitive"
     assert source["relationship"] == "transitive"
     assert source["locations"][0]["evidence_classification"] == "direct_import"
+    assert source["dependency_relationship"] == "transitive"
+    assert source["application_usage_classifications"] == ["direct_import"]
+    assert source["vulnerability_reachability"] == [{"status": "unknown"}]
     assert validate_evidence_report(report) is report
+
+    comment = render_pr_comment(report, "The demo dependency is transitive and directly imported by the application. The demo package is a direct application dependency.")
+    assert "dependency graph says transitive" in comment
+    assert "application evidence: direct_import" in comment
+    assert "vulnerability reachability: unknown" in comment
+    assert "direct application dependency" not in comment
+
+    prompt = render_review_prompt(report)
+    assert '"dependency_relationship": "transitive"' in prompt
+    assert '"application_usage_classifications": ["direct_import"]' in prompt
 
 
 def test_source_candidates_prioritize_production_files_over_test_files(tmp_path, monkeypatch):
@@ -291,6 +355,15 @@ def test_report_represents_vulnerability_reachability_as_unknown_without_specifi
     validate_evidence_report(report)
 
 
+def test_definitive_reachability_status_requires_evidence():
+    from vulnerability_agent.report_validation import VulnerabilityReachability
+
+    with pytest.raises(ValueError, match="requires supporting evidence"):
+        VulnerabilityReachability(status="established")
+    with pytest.raises(ValueError, match="requires supporting evidence"):
+        VulnerabilityReachability(status="not_established")
+
+
 def test_comment_does_not_publish_fabricated_source_claims_when_evidence_is_missing():
     report = {
         "dependency_changes": [], "summary": {"dependency_updates": [], "tests": {}, "osv": {}},
@@ -305,4 +378,64 @@ def test_comment_does_not_publish_fabricated_source_claims_when_evidence_is_miss
     assert "prove all functionality" not in body
     assert "whole repository is secure" not in body
     assert "release notes prove application compatibility" not in body
+
+
+def test_comment_labels_limited_source_location_selection():
+    report = {
+        "dependency_changes": [],
+        "summary": {"dependency_updates": [], "tests": {}, "osv": {}},
+        "source_usage": [{"package": "demo", "locations": [
+            {"path": f"src/module_{index}.py", "line_start": index, "line_end": index,
+             "evidence_classification": "direct_import"}
+            for index in range(1, 7)
+        ]}],
+    }
+    body = render_pr_comment(report, "")
+    assert "showing 3 of 6" in body
+    assert "src/module_3.py" in body
+    assert "src/module_4.py" not in body
+
+
+def test_configuration_or_lockfile_reference_is_not_presented_as_application_usage():
+    body = render_pr_comment({
+        "dependency_changes": [], "summary": {"dependency_updates": [], "tests": {}, "osv": {}},
+        "source_usage": [{"package": "demo", "relationship": "transitive",
+                          "application_usage_classifications": ["configuration"],
+                          "vulnerability_reachability": [{"status": "unknown"}], "locations": []}],
+    }, "")
+    assert "configuration/lockfile reference only; application usage not established" in body
+    assert "vulnerability reachability: unknown" in body
+
+
+def test_recommendation_includes_version_guidance_usage_and_unknown_reachability():
+    report = review._compact_review_report({
+        "mode": "dependabot_pr_review", "status": "review_complete", "repository_full_name": "acme/demo",
+        "pull_request": {"number": 4}, "files_changed": [],
+        "dependency_changes": [{"package": "langchain-core", "ecosystem": "pypi", "base_version": "0.2.40",
+                                "head_version": "0.2.41", "relationship": "transitive",
+                                "dependency_paths": [["langchain", "langchain-core"]]}],
+        "source_usage_status": "completed_with_matches",
+        "source_usage": [{"package": "langchain-core", "ecosystem": "pypi", "relationship": "transitive",
+                           "dependency_paths": [["langchain", "langchain-core"]], "advisory_ids": ["GHSA-TEST"],
+                           "application_usage_classifications": ["direct_import"],
+                           "locations": [{"path": "src/app.py", "line_start": 8, "line_end": 8,
+                                          "evidence_classification": "direct_import"}]}],
+        "base": {"tests": {"passed": True}, "security_scan": {"scan_status": "complete", "findings": [], "unresolved_packages": []}},
+        "head": {"tests": {"passed": True}, "security_scan": {"scan_status": "complete", "findings": [], "unresolved_packages": []}},
+        "security_delta": {
+            "resolved": [], "introduced": [],
+            "remaining": [{"id": "GHSA-TEST", "package": "langchain-core", "ecosystem": "PyPI", "version": "0.2.41",
+                           "affected_range_status": "available", "fixed_version_status": "available",
+                           "fixed_versions": ["0.2.42"], "aliases": ["CVE-2025-54321"]}],
+            "unaffected": [], "not_assessed": [],
+        },
+    })
+    recommendation = report["summary"]["recommendation"]
+    assert "langchain-core 0.2.41" in recommendation
+    assert "affected range is available" in recommendation
+    assert "fixed version available (0.2.42)" in recommendation
+    assert "application evidence direct_import" in recommendation
+    assert "reachability unknown" in recommendation
+    assert "do not establish vulnerable API reachability" in recommendation
+    assert "exploitable" not in recommendation
 

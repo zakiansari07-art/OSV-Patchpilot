@@ -3,6 +3,21 @@ import json
 import main
 
 
+def test_source_analysis_placeholder_keeps_package_metadata_and_is_not_osv_finding():
+    groups = main._group_source_analysis_inputs([{
+        "id": "source-analysis:pypi:langchain-core",
+        "package": {"name": "langchain-core", "ecosystem": "pypi"},
+        "version": "0.2.41", "relationship": "transitive",
+        "dependency_paths": [["langchain", "langchain-core"]], "advisories": [],
+    }])
+
+    assert len(groups) == 1
+    assert groups[0]["package"] == {"name": "langchain-core", "version": "0.2.41", "ecosystem": "pypi"}
+    assert groups[0]["advisories"] == []
+    assert groups[0]["advisory_ids"] == []
+    assert groups[0]["relationship"] == "transitive"
+
+
 class FakeWorkflow:
     def invoke(self, state, config=None):
         return {
