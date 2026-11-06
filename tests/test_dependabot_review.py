@@ -17,6 +17,7 @@ from vulnerability_agent.review_graph import (
     render_pr_comment,
     render_review_prompt,
 )
+from vulnerability_agent.report_validation import validate_evidence_report
 
 
 def test_parse_pull_request_reference_accepts_url_and_number():
@@ -74,6 +75,27 @@ version = "1.0"
     assert by_name["requests"]["relationship"] == "direct"
     assert by_name["urllib3"]["relationship"] == "transitive"
     assert by_name["urllib3"]["dependency_paths"] == [["requests", "urllib3"]]
+
+
+def test_osv_api_failure_keeps_dependency_inventory_for_change_analysis(tmp_path, monkeypatch):
+    base, head = tmp_path / "base", tmp_path / "head"
+    base.mkdir()
+    head.mkdir()
+    (base / "requirements.txt").write_text("demo==1.0\n")
+    (head / "requirements.txt").write_text("demo==2.0\n")
+    async def fail_osv_scan(*_args):
+        raise RuntimeError("OSV API down")
+    monkeypatch.setattr(review, "scan_packages", fail_osv_scan)
+
+    base_scan = review._scan(base, None)
+    head_scan = review._scan(head, None)
+    changes = review._dependency_changes(base, head, base_scan, head_scan)
+
+    assert base_scan["scan_status"] == head_scan["scan_status"] == "failed"
+    assert base_scan["resolved_packages"][0]["name"] == "demo"
+    assert [(item["package"], item["base_version"], item["head_version"]) for item in changes] == [
+        ("demo", "1.0", "2.0"),
+    ]
 
 
 def test_test_comparison_marks_new_pr_failure_as_regression_evidence():
@@ -344,7 +366,8 @@ def test_review_runs_base_then_head_and_reports_osv_delta(tmp_path, monkeypatch)
     assert result["status"] == "review_complete"
     assert [path.name for path in seen_tests] == ["base", "head"]
     assert seen_usage[0][0] == seen_tests[1]
-    assert seen_usage[0][1][0]["id"] == "GHSA-old"
+    assert seen_usage[0][1][0]["package"] == "demo"
+    assert seen_usage[0][1][0]["advisories"][0]["id"] == "GHSA-old"
     assert result["schema_version"] == 4
     assert result["tests"]["base"]["passed"] is True
     assert result["tests"]["pr"]["passed"] is True
@@ -354,12 +377,163 @@ def test_review_runs_base_then_head_and_reports_osv_delta(tmp_path, monkeypatch)
     assert result["summary"]["osv"]["unaffected"] == 0
     assert result["osv_scans"]["base"]["finding_count"] == 1
     assert result["summary"]["source_usage"]["retrieval_status"] == "completed_without_matches"
+    assert result["summary"]["dependency_analyses"][0]["source_analysis_status"] == "completed_without_matches"
+    assert result["summary"]["dependency_analyses"][0]["osv_status"] == "complete"
     resolved = result["security_delta"]["resolved"][0]
     assert (resolved["package"], resolved["ecosystem"], resolved["version"]) == ("demo", "PyPI", "1.0")
     assert resolved["advisory_count"] == 1
     assert resolved["advisories"][0]["id"] == "GHSA-old"
     assert resolved["advisories"][0]["fixed_version_status"] == "unavailable"
     assert github.get.call_count == 2
+
+
+def _run_dependency_review(tmp_path, monkeypatch, *, changes, scans, usage_analyzer):
+    repository = tmp_path / "review-repo"
+    repository.mkdir()
+    (repository / ".git").mkdir()
+    metadata = Mock()
+    metadata.json.return_value = {
+        "state": "open", "user": {"login": "dependabot[bot]"},
+        "html_url": "https://github.com/acme/demo/pull/17", "title": "Bump dependencies",
+        "base": {"ref": "main", "sha": "base-sha"},
+        "head": {"ref": "dependabot/pip/demo", "sha": "head-sha"},
+        "changed_files": 1,
+    }
+    files = Mock()
+    files.json.return_value = [{
+        "filename": "poetry.lock", "status": "modified", "additions": 1,
+        "deletions": 1, "patch": "@@ -1 +1 @@\n-old\n+new",
+    }]
+    github = Mock()
+    github.get.side_effect = [metadata, files]
+
+    def fake_git(root, *args):
+        if args[:3] == ("remote", "get-url", "origin"):
+            return "https://github.com/acme/demo.git"
+        if args[0] == "rev-parse":
+            return {"refs/agent-review/17/base": "base-sha", "refs/agent-review/17/head": "head-sha"}[args[1]]
+        if args[:2] == ("worktree", "add"):
+            Path(args[-2]).mkdir(parents=True, exist_ok=True)
+        return ""
+
+    monkeypatch.setattr(review, "_git", fake_git)
+    monkeypatch.setattr(review, "_test", lambda *_: {"passed": True, "returncode": 0, "output": "ok"})
+    scan_iter = iter(scans)
+    monkeypatch.setattr(review, "_scan", lambda *_: next(scan_iter))
+    monkeypatch.setattr(review, "_dependency_changes", lambda *_: changes)
+    monkeypatch.setattr(review, "_release_context", lambda _changes: [])
+    return review.review_dependabot_pull_request(
+        repository, "17", github_client=github, usage_analyzer=usage_analyzer,
+    )
+
+
+def _complete_scan(findings=None):
+    return {
+        "scan_status": "complete", "manifests": ["poetry.lock"], "packages_checked": 1,
+        "unresolved_packages": [], "findings": findings or [],
+    }
+
+
+def test_zero_osv_findings_still_runs_source_analysis_for_changed_dependency(tmp_path, monkeypatch):
+    calls = []
+    changes = [{"package": "demo", "ecosystem": "pypi", "base_version": "1.0", "head_version": "2.0",
+                "relationship": "direct", "dependency_paths": [["demo"]]}]
+    report = _run_dependency_review(
+        tmp_path, monkeypatch, changes=changes, scans=[_complete_scan(), _complete_scan()],
+        usage_analyzer=lambda _head, targets: calls.extend(targets) or [{
+            "package": "demo", "ecosystem": "pypi", "locations": [],
+            "evidence_classification": "no_evidence", "advisory_ids": [],
+        }],
+    )
+
+    assert [item["package"] for item in calls] == ["demo"]
+    assert calls[0]["advisories"] == []
+    assert report["summary"]["dependency_analyses"] == [{
+        "package": "demo", "ecosystem": "pypi", "base_version": "1.0", "head_version": "2.0",
+        "osv_status": "complete", "source_analysis_status": "completed_without_matches",
+    }]
+    assert report["summary"]["source_usage"]["retrieval_status"] == "completed_without_matches"
+    comment = render_pr_comment(report, "")
+    assert "OSV complete; source analysis completed_without_matches" in comment
+    assert validate_evidence_report(report) is report
+
+
+def test_no_dependency_change_is_not_applicable_and_differs_from_no_rag_matches(tmp_path, monkeypatch):
+    report = _run_dependency_review(
+        tmp_path, monkeypatch, changes=[], scans=[_complete_scan(), _complete_scan()],
+        usage_analyzer=lambda *_: pytest.fail("Source analysis should not run without changed dependencies"),
+    )
+
+    assert report["summary"]["source_usage"]["retrieval_status"] == "not_applicable"
+    assert report["summary"]["source_usage"]["retrieval_status"] != "completed_without_matches"
+
+
+def test_multiple_changed_dependencies_receive_independent_source_statuses(tmp_path, monkeypatch):
+    changes = [
+        {"package": "alpha", "ecosystem": "pypi", "base_version": "1", "head_version": "2",
+         "relationship": "direct", "dependency_paths": [["alpha"]]},
+        {"package": "beta", "ecosystem": "pypi", "base_version": "1", "head_version": "2",
+         "relationship": "transitive", "dependency_paths": [["alpha", "beta"]]},
+    ]
+    calls = []
+
+    def analyze(_head, targets):
+        calls.extend(targets)
+        return [
+            {"package": "alpha", "ecosystem": "pypi", "locations": [{"path": "src/a.py", "line_start": 1, "line_end": 1}],
+             "evidence_classification": "direct_import", "advisory_ids": []},
+            {"package": "beta", "ecosystem": "pypi", "locations": [],
+             "evidence_classification": "no_evidence", "advisory_ids": []},
+        ]
+
+    report = _run_dependency_review(
+        tmp_path, monkeypatch, changes=changes, scans=[_complete_scan(), _complete_scan()], usage_analyzer=analyze,
+    )
+
+    assert [item["package"] for item in calls] == ["alpha", "beta"]
+    statuses = {item["package"]: item["source_analysis_status"] for item in report["summary"]["dependency_analyses"]}
+    assert statuses == {"alpha": "completed_with_matches", "beta": "completed_without_matches"}
+    assert validate_evidence_report(report) is report
+
+
+def test_source_analysis_failure_preserves_osv_findings(tmp_path, monkeypatch):
+    changed = {"package": "demo", "ecosystem": "pypi", "base_version": "1", "head_version": "2",
+               "relationship": "direct", "dependency_paths": [["demo"]]}
+    finding = {"id": "GHSA-demo", "package": "demo", "ecosystem": "pypi", "version": "2", "summary": "Issue"}
+    report = _run_dependency_review(
+        tmp_path, monkeypatch, changes=[changed], scans=[_complete_scan(), _complete_scan([finding])],
+        usage_analyzer=lambda *_: (_ for _ in ()).throw(RuntimeError("index unavailable")),
+    )
+
+    assert report["security_delta"]["introduced"][0]["advisories"][0]["id"] == "GHSA-demo"
+    assert report["summary"]["dependency_analyses"][0]["osv_status"] == "complete"
+    assert report["summary"]["dependency_analyses"][0]["source_analysis_status"] == "failed"
+    assert "index unavailable" in report["source_usage"][0]["error"]
+    comment = render_pr_comment(report, "")
+    assert "source analysis failed" in comment
+    assert "OSV results are reported independently" in comment
+    assert validate_evidence_report(report) is report
+
+
+def test_osv_failure_does_not_prevent_source_analysis(tmp_path, monkeypatch):
+    changed = {"package": "demo", "ecosystem": "pypi", "base_version": "1", "head_version": "2",
+               "relationship": "direct", "dependency_paths": [["demo"]]}
+    failed = {"scan_status": "failed", "scan_error": "OSV unavailable", "manifests": ["poetry.lock"],
+              "packages_checked": 1, "unresolved_packages": [], "findings": []}
+    calls = []
+    report = _run_dependency_review(
+        tmp_path, monkeypatch, changes=[changed], scans=[failed, failed],
+        usage_analyzer=lambda _head, targets: calls.extend(targets) or [{
+            "package": "demo", "ecosystem": "pypi", "locations": [],
+            "evidence_classification": "no_evidence", "advisory_ids": [],
+        }],
+    )
+
+    assert len(calls) == 1
+    assert report["summary"]["dependency_analyses"][0]["osv_status"] == "failed"
+    assert report["summary"]["dependency_analyses"][0]["source_analysis_status"] == "completed_without_matches"
+    assert report["summary"]["osv"]["not_assessed"] == 1
+    assert validate_evidence_report(report) is report
 
 
 def test_actions_only_update_keeps_python_baseline_out_of_pr_delta():

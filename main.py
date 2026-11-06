@@ -668,25 +668,40 @@ def main(argv: Sequence[str] | None = None) -> int:
         if repo is not None and (not repo.is_dir() or not (repo / ".git").exists()):
             parser.error(f"Not a Git working tree: {repo}")
 
-        def analyze_usage(head_repository: Path, findings: list[dict[str, Any]]) -> list[dict[str, Any]]:
-            """Reuse the existing report-only hybrid RAG node on the PR snapshot."""
-            if not findings:
+        def analyze_usage(head_repository: Path, dependencies: list[dict[str, Any]]) -> list[dict[str, Any]]:
+            """Analyze every changed package, attaching advisory context only when present."""
+            if not dependencies:
                 return []
             from vulnerability_agent.dependencies import create_dependencies
             from vulnerability_agent.nodes.usage_analysis import node_report_source_usage
-            from osv_service import group_advisories_by_package
 
-            dependencies = create_dependencies(audit_database_path=state_database, run_id=f"dependabot-review-{uuid.uuid4().hex}")
+            agent_dependencies = create_dependencies(audit_database_path=state_database, run_id=f"dependabot-review-{uuid.uuid4().hex}")
             analyses: list[dict[str, Any]] = []
-            for group in group_advisories_by_package([
-                {**item, "package": {"name": item.get("package", ""), "version": item.get("version", ""), "ecosystem": item.get("ecosystem", "PyPI")}}
-                for item in findings
-            ]):
+            for dependency in dependencies:
+                package_name = str(dependency.get("package", ""))
+                ecosystem = str(dependency.get("ecosystem", "PyPI"))
+                target = {
+                    "id": "dependency-change",
+                    "package": {
+                        "name": package_name,
+                        "version": str(dependency.get("head_version", "")),
+                        "ecosystem": ecosystem,
+                    },
+                    "advisories": dependency.get("advisories", []),
+                }
                 result = node_report_source_usage({
                     "repo_path": str(head_repository), "main_repo_path": str(head_repository),
-                    "current_vuln": group,
-                }, dependencies)
-                analyses.extend(result.get("usage_analysis", []))
+                    "current_vuln": target,
+                }, agent_dependencies)
+                analysis = result.get("current_usage_analysis", {})
+                analysis["ecosystem"] = ecosystem
+                analysis.setdefault("analysis_status", (
+                    "completed_with_matches" if analysis.get("locations")
+                    else "completed_without_matches"
+                ))
+                if analysis["analysis_status"] == "failed":
+                    analysis["error"] = str(analysis.get("retrieval", {}).get("warning", "Source analysis failed."))
+                analyses.append(analysis)
             return analyses
 
         started_at = datetime.now(timezone.utc)

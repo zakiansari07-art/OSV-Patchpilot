@@ -318,6 +318,18 @@ def test_no_source_match_returns_explicit_no_evidence(monkeypatch, tmp_path):
     analysis = _run_usage_analysis(tmp_path, monkeypatch)
     assert analysis["locations"] == []
     assert analysis["evidence_classification"] == "no_evidence"
+    assert analysis["analysis_status"] == "completed_without_matches"
+
+
+def test_source_search_failure_has_failed_status_not_completed_without_matches(monkeypatch, tmp_path):
+    monkeypatch.setattr(usage_analysis, "_source_paths", lambda *_args: (_ for _ in ()).throw(OSError("source unavailable")))
+    result = usage_analysis.node_report_source_usage({
+        "repo_path": str(tmp_path), "main_repo_path": str(tmp_path),
+        "current_vuln": {"package": {"name": "demo", "ecosystem": "PyPI"}},
+        "usage_analysis": [],
+    }, AgentDependencies(tools=object(), code_retriever=object()))
+
+    assert result["current_usage_analysis"]["analysis_status"] == "failed"
 
 
 def test_duplicate_retrieval_locations_are_removed_and_strongest_evidence_wins():
