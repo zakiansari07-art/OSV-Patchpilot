@@ -244,19 +244,19 @@ def test_transitive_dependency_usage_evidence_stays_separate_from_relationship()
     assert source["relationship"] == "transitive"
     assert source["locations"][0]["evidence_classification"] == "direct_import"
     assert source["dependency_relationship"] == "transitive"
-    assert source["application_usage_classifications"] == ["direct_import"]
+    assert source["source_usage_classifications"] == ["direct_import"]
     assert source["vulnerability_reachability"] == [{"status": "unknown"}]
     assert validate_evidence_report(report) is report
 
     comment = render_pr_comment(report, "The demo dependency is transitive and directly imported by the application. The demo package is a direct application dependency.")
     assert "dependency graph says transitive" in comment
-    assert "application evidence: direct_import" in comment
+    assert "production source evidence: direct_import" in comment
     assert "vulnerability reachability: unknown" in comment
     assert "direct application dependency" not in comment
 
     prompt = render_review_prompt(report)
     assert '"dependency_relationship": "transitive"' in prompt
-    assert '"application_usage_classifications": ["direct_import"]' in prompt
+    assert '"source_usage_classifications": ["direct_import"]' in prompt
 
 
 def test_source_candidates_prioritize_production_files_over_test_files(tmp_path, monkeypatch):
@@ -369,7 +369,7 @@ def test_package_evidence_label_is_derived_from_traceable_import_locations():
         ],
     }])
     assert compact["evidence_classification"] == "direct_import"
-    assert compact["application_usage_classifications"] == ["direct_import"]
+    assert compact["source_usage_classifications"] == ["direct_import"]
 
 
 @pytest.mark.parametrize("usage_class,expected", [
@@ -475,7 +475,7 @@ def test_configuration_or_lockfile_reference_is_not_presented_as_application_usa
                           "application_usage_classifications": ["configuration"],
                           "vulnerability_reachability": [{"status": "unknown"}], "locations": []}],
     }, "")
-    assert "configuration/lockfile reference only; application usage not established" in body
+    assert "configuration reference only; production source usage not established" in body
     assert "vulnerability reachability: unknown" in body
 
 
@@ -513,13 +513,14 @@ def test_recommendation_includes_version_guidance_usage_and_unknown_reachability
     assert "langchain-core 0.2.41" in recommendation
     assert "affected range is available" in recommendation
     assert "fixed version available (0.2.42)" in recommendation
-    assert "application evidence direct_import" in recommendation
+    assert "production source evidence direct_import" in recommendation
     assert "reachability unknown" in recommendation
     assert "do not establish vulnerable API reachability" in recommendation
     assert "exploitable" not in recommendation
     assert "deterministic affected installed version" in recommendation
     assert "Test evidence: base passed, PR passed" in recommendation
     assert "passing tests do not change the OSV affected-version assessment" in recommendation
+    assert "No regression detected by the current test suite" in recommendation
     assert "langchain-core 0.2.41 (1 advisory record(s))" in recommendation
     comment = render_pr_comment(
         report,
@@ -528,6 +529,58 @@ def test_recommendation_includes_version_guidance_usage_and_unknown_reachability
     assert "Deterministic installed-version assessment" in comment
     assert "remaining (PR snapshot): 1 affected" in comment
     assert "not vulnerable and is safe to merge" not in comment
+
+
+@pytest.mark.parametrize(("constraint_status", "constraint", "expected"), [
+    ("complete", "^0.2.0", "conflict with recorded constraint(s)"),
+    ("partial", "^0.2.0", "conflict with recorded constraint(s)"),
+    ("partial", "*", "compatibility with parent constraints is unknown"),
+])
+def test_recommendation_never_suggests_fixed_version_that_conflicts_with_parent(constraint_status, constraint, expected):
+    report = review._compact_review_report({
+        "mode": "dependabot_pr_review", "status": "review_complete", "repository_full_name": "acme/demo",
+        "pull_request": {"number": 5}, "files_changed": [],
+        "dependency_changes": [{"package": "langchain-core", "ecosystem": "pypi", "base_version": "0.2.41",
+                                "head_version": "0.2.43", "relationship": "transitive",
+                                "dependency_paths": [["langchain", "langchain-core"]],
+                                "upgrade_constraints": [{"parent": "langchain", "constraint": constraint}],
+                                "upgrade_constraints_status": constraint_status}],
+        "source_usage_status": "completed_without_matches", "source_usage": [],
+        "base": {"tests": {"passed": True}, "security_scan": {"scan_status": "complete", "findings": [], "unresolved_packages": []}},
+        "head": {"tests": {"passed": True}, "security_scan": {"scan_status": "complete", "findings": [], "unresolved_packages": []}},
+        "security_delta": {"resolved": [], "introduced": [], "unaffected": [], "not_assessed": [],
+                           "remaining": [{"id": "GHSA-TEST", "package": "langchain-core", "ecosystem": "PyPI",
+                                          "version": "0.2.43", "fixed_versions": ["0.3.80"],
+                                          "fixed_version_status": "available", "affected_range_status": "available",
+                                          "version_assessment": {"status": "affected", "assessment_status": "complete",
+                                                                 "confidence": "deterministic", "installed_version": "0.2.43",
+                                                                 "reason": "Fixture range."}}]},
+    })
+    recommendation = report["summary"]["recommendation"]
+    assert expected in recommendation
+    if "conflict" in expected:
+        assert "parent or coordinated dependency upgrade is needed" in recommendation
+        assert "do not upgrade this package in isolation" in recommendation
+
+
+def test_source_usage_field_is_neutral_and_legacy_report_is_normalized():
+    report = review._compact_review_report({
+        "mode": "dependabot_pr_review", "status": "review_complete", "repository_full_name": "acme/demo",
+        "pull_request": {"number": 6}, "files_changed": [], "dependency_changes": [],
+        "source_usage_status": "completed_with_matches",
+        "source_usage": [{"package": "demo", "ecosystem": "pypi", "relationship": "unknown",
+                           "application_usage_classifications": ["test_only"],
+                           "locations": [{"path": "tests/test_demo.py", "line_start": 8, "line_end": 8,
+                                          "evidence_classification": "test_only"}]}],
+        "base": {"tests": {"passed": True}, "security_scan": {"scan_status": "complete", "findings": [], "unresolved_packages": []}},
+        "head": {"tests": {"passed": True}, "security_scan": {"scan_status": "complete", "findings": [], "unresolved_packages": []}},
+        "security_delta": {"resolved": [], "introduced": [], "remaining": [], "unaffected": [], "not_assessed": []},
+    })
+    usage = report["source_usage"][0]
+    assert usage["source_usage_classifications"] == ["test_only"]
+    assert "application_usage_classifications" not in usage
+    assert "production source evidence: not established" in render_pr_comment(report, "")
+    assert "test evidence: test_only" in render_pr_comment(report, "")
 
 
 def test_ai_narrative_cannot_attribute_global_remaining_count_to_one_package():
@@ -565,7 +618,7 @@ def test_unchanged_dependency_findings_remain_affected_and_are_labeled_out_of_sc
         "head": {"tests": {"passed": True}, "security_scan": {"scan_status": "complete", "findings": [finding]}},
         "security_delta": {"resolved": [], "introduced": [], "remaining": [], "unaffected": [finding], "not_assessed": []},
     })
-    assert report["schema_version"] == 5
+    assert report["schema_version"] == 6
     assert report["security_delta"]["counts"]["unchanged_dependencies"] == 1
     assert report["security_delta"]["version_assessment_counts"]["unchanged_dependencies"]["affected"] == 1
     assert "unaffected" not in report["security_delta"]

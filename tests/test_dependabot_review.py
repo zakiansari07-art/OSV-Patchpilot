@@ -111,6 +111,10 @@ version = "1.0"
     assert by_name["requests"]["relationship"] == "direct"
     assert by_name["urllib3"]["relationship"] == "transitive"
     assert by_name["urllib3"]["dependency_paths"] == [["requests", "urllib3"]]
+    assert by_name["urllib3"]["upgrade_constraints"] == [
+        {"parent": "requests", "constraint": ">=1", "source": "poetry.lock"},
+    ]
+    assert by_name["urllib3"]["upgrade_constraints_status"] == "complete"
 
 
 def test_test_comparison_marks_new_pr_failure_as_regression_evidence():
@@ -403,7 +407,7 @@ def test_review_runs_base_then_head_and_reports_osv_delta(tmp_path, monkeypatch)
     assert seen_usage[0][0] == seen_tests[1]
     assert seen_usage[0][1][0]["id"].startswith("source-analysis:")
     assert seen_usage[0][1][0]["advisories"] == []
-    assert result["schema_version"] == 5
+    assert result["schema_version"] == 6
     assert result["tests"]["base"]["passed"] is True
     assert result["tests"]["pr"]["passed"] is True
     assert result["files_changed"][0]["path"] == "requirements.txt"
@@ -415,7 +419,7 @@ def test_review_runs_base_then_head_and_reports_osv_delta(tmp_path, monkeypatch)
         "relationship": "unknown", "dependency_paths": [],
     }]
     assert result["summary"]["dependency_analyses"][0]["relationship"] == "unknown"
-    assert result["validation"] == {"status": "passed", "schema_version": 5, "errors": [], "warnings": []}
+    assert result["validation"] == {"status": "passed", "schema_version": 6, "errors": [], "warnings": []}
     assert result["osv_scans"]["base"]["finding_count"] == 1
     resolved = result["security_delta"]["resolved"][0]
     assert (resolved["package"], resolved["ecosystem"], resolved["version"]) == ("demo", "PyPI", "1.0")
@@ -674,7 +678,7 @@ def test_compact_schema_serializes_complete_package_advisory_provenance():
         "security_delta": delta, "dependency_changes": [],
     })
     loaded = json.loads(json.dumps(report))
-    assert loaded["schema_version"] == 5
+    assert loaded["schema_version"] == 6
     advisory = loaded["security_delta"]["remaining"][0]["advisories"][0]
     assert advisory["finding_identity"] == "pypi:demo:ghsa-1"
     assert advisory["fixed_version_status"] == "unavailable"
@@ -707,7 +711,7 @@ def test_report_compaction_groups_advisories_and_limits_rag_locations():
             "retrieval": {"backend": "qdrant_local_hybrid"},
         }],
     })
-    assert report["schema_version"] == 5
+    assert report["schema_version"] == 6
     assert report["summary"]["osv"]["remaining"] == 6
     assert len(report["security_delta"]["remaining"]) == 1
     assert report["security_delta"]["remaining"][0]["advisory_count"] == 6
@@ -765,9 +769,9 @@ def test_pr_comment_uses_detailed_dependency_data_and_preserves_evidence_label()
     assert "stale-summary-entry" not in no_changes
 
 
-def test_report_v5_json_schema_and_per_dependency_source_statuses():
+def test_report_v6_json_schema_and_per_dependency_source_statuses():
     schema = evidence_report_json_schema()
-    assert schema["properties"]["schema_version"]["const"] == 5
+    assert schema["properties"]["schema_version"]["const"] == 6
     changes = [
         {"package": name, "ecosystem": "pypi", "base_version": "1.0", "head_version": "2.0",
          "relationship": relation, "dependency_paths": [[name]]}
@@ -795,6 +799,9 @@ def test_report_v5_json_schema_and_per_dependency_source_statuses():
     legacy = json.loads(json.dumps(report))
     legacy["schema_version"] = 4
     legacy["validation"]["schema_version"] = 4
+    for item in legacy["source_usage"]:
+        if "source_usage_classifications" in item:
+            item["application_usage_classifications"] = item.pop("source_usage_classifications")
     legacy["summary"]["osv"]["unaffected"] = legacy["summary"]["osv"].pop("unchanged_dependencies")
     legacy_delta = legacy["security_delta"]
     legacy_delta["unaffected"] = legacy_delta.pop("unchanged_dependencies")
@@ -803,6 +810,14 @@ def test_report_v5_json_schema_and_per_dependency_source_statuses():
     for key in ("package_groups", "unique_advisory_ids", "underlying_vulnerabilities"):
         legacy_delta["count_semantics"][key]["unaffected"] = legacy_delta["count_semantics"][key].pop("unchanged_dependencies")
     assert validate_evidence_report(legacy) is legacy
+
+    legacy_v5 = json.loads(json.dumps(report))
+    legacy_v5["schema_version"] = 5
+    legacy_v5["validation"]["schema_version"] = 5
+    for item in legacy_v5["source_usage"]:
+        if "source_usage_classifications" in item:
+            item["application_usage_classifications"] = item.pop("source_usage_classifications")
+    assert validate_evidence_report(legacy_v5) is legacy_v5
 
 
 def test_pr_comment_is_compact_and_links_full_report_artifact():
