@@ -333,9 +333,9 @@ def test_test_only_and_configuration_references_are_not_production_usage():
     compact = review._compact_source_usage([
         {"package": "demo", "ecosystem": "PyPI", "locations": [
             {"path": "tests/test_demo.py", "line_start": 1, "line_end": 1,
-             "evidence_classification": "test_only"},
+             "evidence_classification": "semantic_context"},
             {"path": "pyproject.toml", "line_start": 1, "line_end": 1,
-             "evidence_classification": "configuration"},
+             "evidence_classification": "semantic_context"},
         ]},
     ])[0]
     assert [item["evidence_classification"] for item in compact["locations"]] == ["test_only", "configuration"]
@@ -360,9 +360,13 @@ def test_package_evidence_label_is_derived_from_traceable_import_locations():
     compact, = review._compact_source_usage([{
         "package": "langchain-core", "ecosystem": "pypi", "evidence_classification": "no_evidence",
         "application_usage_classifications": ["direct_import"],
-        "locations": [{"path": "src/agent.py", "line_start": 4, "line_end": 4,
-                       "excerpt": "from langchain_core import messages",
-                       "evidence_classification": "direct_import"}],
+        "locations": [
+            {"path": "src/agent.py", "line_start": 4, "line_end": 4,
+             "excerpt": "from langchain_core import messages", "evidence_classification": "semantic_context"},
+            {"path": "src/agent.py", "line_start": 4, "line_end": 4,
+             "excerpt": "from langchain_core import messages", "match_type": "AST import",
+             "evidence_classification": "direct_import"},
+        ],
     }])
     assert compact["evidence_classification"] == "direct_import"
     assert compact["application_usage_classifications"] == ["direct_import"]
@@ -449,6 +453,21 @@ def test_comment_labels_limited_source_location_selection():
     assert "src/module_4.py" not in body
 
 
+def test_comment_surfaces_release_retrieval_and_no_notes_separately():
+    body = render_pr_comment({
+        "dependency_changes": [], "summary": {"dependency_updates": [], "tests": {}, "osv": {}},
+        "release_context": [
+            {"package": "demo", "status": "lookup_failed", "error": "HTTPStatusError: 403"},
+            {"package": "other", "status": "no_release_notes"},
+            {"package": "third", "status": "retrieved", "release_notes": "Notes found."},
+        ],
+        "source_usage": [],
+    }, "")
+    assert "demo: lookup failed (HTTPStatusError: 403)" in body
+    assert "other: no release notes found" in body
+    assert "third: release notes retrieved" in body
+
+
 def test_configuration_or_lockfile_reference_is_not_presented_as_application_usage():
     body = render_pr_comment({
         "dependency_changes": [], "summary": {"dependency_updates": [], "tests": {}, "osv": {}},
@@ -526,4 +545,52 @@ def test_ai_narrative_cannot_attribute_global_remaining_count_to_one_package():
 
     assert _sanitize_ai_review(report, misleading) == ""
     assert _sanitize_ai_review(report, corrected) == corrected
+
+
+def test_unchanged_dependency_findings_remain_affected_and_are_labeled_out_of_scope():
+    finding = {
+        "id": "GHSA-BASELINE", "finding_identity": "pypi:aiohttp:ghsa-baseline",
+        "package": "aiohttp", "ecosystem": "PyPI", "version": "3.10.8", "installed_version": "3.10.8",
+        "aliases": [], "affected_ranges": [{"type": "ECOSYSTEM", "events": [{"introduced": "0"}, {"fixed": "3.14.1"}]}],
+        "affected_versions": [], "version_assessment": {"status": "affected", "assessment_status": "complete",
+            "confidence": "deterministic", "installed_version": "3.10.8", "reason": "Within affected range."},
+    }
+    report = review._compact_review_report({
+        "mode": "dependabot_pr_review", "status": "review_complete", "repository_full_name": "acme/demo",
+        "pull_request": {"number": 4}, "files_changed": [],
+        "dependency_changes": [{"package": "langchain", "ecosystem": "pypi", "base_version": "0.2.16",
+                                "head_version": "0.2.17", "relationship": "direct", "dependency_paths": [["langchain"]]}],
+        "source_usage_status": "completed_without_matches", "source_usage": [],
+        "base": {"tests": {"passed": True}, "security_scan": {"scan_status": "complete", "findings": [finding]}},
+        "head": {"tests": {"passed": True}, "security_scan": {"scan_status": "complete", "findings": [finding]}},
+        "security_delta": {"resolved": [], "introduced": [], "remaining": [], "unaffected": [finding], "not_assessed": []},
+    })
+    assert report["schema_version"] == 5
+    assert report["security_delta"]["counts"]["unchanged_dependencies"] == 1
+    assert report["security_delta"]["version_assessment_counts"]["unchanged_dependencies"]["affected"] == 1
+    assert "unaffected" not in report["security_delta"]
+    comment = render_pr_comment(report, "")
+    assert "1 in unchanged dependencies (out of update scope)" in comment
+    assert "unaffected" not in comment
+
+
+def test_ai_review_does_not_turn_test_only_or_empty_clues_into_production_usage():
+    report = {"source_usage": [{
+        "package": "demo", "application_usage_classifications": ["test_only"],
+        "locations": [{"path": "tests/test_agent.py", "line_start": 72, "evidence_classification": "test_only"}],
+    }]}
+    text = "Source Code Clues: 1. 2.\nThe application uses demo in production. Demo is used in production.\nOnly a test reference was found."
+    clean = _sanitize_ai_review(report, text)
+    assert "Source Code Clues" not in clean
+    assert "uses demo in production" not in clean
+    assert "is used in production" not in clean
+    assert "Only a test reference was found." in clean
+
+
+def test_ai_review_cannot_invent_upstream_release_explanation_after_lookup_failure():
+    report = {"release_context": [{"package": "demo", "status": "lookup_failed", "error": "HTTPStatusError"}]}
+    text = "The release notes explain why the dependency was replaced. The release notes were unavailable."
+    clean = _sanitize_ai_review(report, text)
+    assert "explain why" not in clean
+    assert "release notes were unavailable" in clean
 

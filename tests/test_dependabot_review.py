@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import httpx
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock
@@ -25,6 +26,39 @@ from vulnerability_agent.review_graph import (
 def test_parse_pull_request_reference_accepts_url_and_number():
     assert review.parse_pull_request_reference("https://github.com/acme/demo/pull/17") == ("acme/demo", 17)
     assert review.parse_pull_request_reference("#17") == ("", 17)
+
+
+@pytest.mark.parametrize(("release_status", "body", "expected"), [
+    (200, "Release notes", "retrieved"),
+    (200, "", "no_release_notes"),
+    (404, "", "no_release_notes"),
+    (403, "", "lookup_failed"),
+])
+def test_release_lookup_status_is_explicit_and_machine_readable(monkeypatch, release_status, body, expected):
+    registry = Mock()
+    registry.status_code = 200
+    registry.raise_for_status.return_value = None
+    registry.json.return_value = {"info": {"project_urls": {"Source": "https://github.com/acme/demo"}}}
+    release = Mock()
+    release.status_code = release_status
+    if release_status == 403:
+        response = httpx.Response(403, request=httpx.Request("GET", "https://api.github.com/example"))
+        release.raise_for_status.side_effect = httpx.HTTPStatusError("forbidden", request=response.request, response=response)
+    else:
+        release.raise_for_status.return_value = None
+    release.json.return_value = {"body": body}
+    client = Mock()
+    client.get.side_effect = [registry, release] if release_status != 404 else [registry, release, release]
+    monkeypatch.setattr(review.httpx, "Client", lambda **_kwargs: client)
+
+    records = review._release_context([{"package": "demo", "ecosystem": "pypi", "head_version": "1.2.3"}])
+
+    assert records[0]["status"] == expected
+    assert client.close.called
+    if expected == "lookup_failed":
+        assert "HTTPStatusError" in records[0]["error"]
+    if expected == "retrieved":
+        assert records[0]["release_notes"] == "Release notes"
 
 
 @pytest.mark.parametrize("value", ["https://evil.test/acme/demo/pull/2", "abc", "owner/repo"])
@@ -367,20 +401,21 @@ def test_review_runs_base_then_head_and_reports_osv_delta(tmp_path, monkeypatch)
     assert result["status"] == "review_complete"
     assert [path.name for path in seen_tests] == ["base", "head"]
     assert seen_usage[0][0] == seen_tests[1]
-    assert seen_usage[0][1][0]["id"] == "GHSA-old"
-    assert result["schema_version"] == 4
+    assert seen_usage[0][1][0]["id"].startswith("source-analysis:")
+    assert seen_usage[0][1][0]["advisories"] == []
+    assert result["schema_version"] == 5
     assert result["tests"]["base"]["passed"] is True
     assert result["tests"]["pr"]["passed"] is True
     assert result["files_changed"][0]["path"] == "requirements.txt"
     assert result["files_truncated"] is True
     assert result["summary"]["osv"]["resolved"] == 1
-    assert result["summary"]["osv"]["unaffected"] == 0
+    assert result["summary"]["osv"]["unchanged_dependencies"] == 0
     assert result["summary"]["dependency_updates"] == [{
         "package": "demo", "from": "1.0", "to": "2.0", "ecosystem": "pypi",
         "relationship": "unknown", "dependency_paths": [],
     }]
     assert result["summary"]["dependency_analyses"][0]["relationship"] == "unknown"
-    assert result["validation"] == {"status": "passed", "schema_version": 4, "errors": [], "warnings": []}
+    assert result["validation"] == {"status": "passed", "schema_version": 5, "errors": [], "warnings": []}
     assert result["osv_scans"]["base"]["finding_count"] == 1
     resolved = result["security_delta"]["resolved"][0]
     assert (resolved["package"], resolved["ecosystem"], resolved["version"]) == ("demo", "PyPI", "1.0")
@@ -390,14 +425,22 @@ def test_review_runs_base_then_head_and_reports_osv_delta(tmp_path, monkeypatch)
     assert github.get.call_count == 2
 
 
-@pytest.mark.parametrize(("osv_results", "source_fails"), [
+@pytest.mark.parametrize(("osv_results", "source_fails", "release_fails"), [
     ([{"scan_status": "complete", "findings": [], "unresolved_packages": []},
-      {"scan_status": "complete", "findings": [], "unresolved_packages": []}], False),
-    ([RuntimeError("OSV offline"), {"scan_status": "complete", "findings": [], "unresolved_packages": []}], False),
+      {"scan_status": "complete", "findings": [], "unresolved_packages": []}], False, False),
+    ([RuntimeError("OSV offline"), {"scan_status": "complete", "findings": [], "unresolved_packages": []}], False, False),
     ([{"scan_status": "complete", "findings": [{"id": "GHSA-one", "package": "demo", "ecosystem": "PyPI", "version": "1"}], "unresolved_packages": []},
-      {"scan_status": "complete", "findings": [{"id": "GHSA-one", "package": "demo", "ecosystem": "PyPI", "version": "2"}], "unresolved_packages": []}], True),
+      {"scan_status": "complete", "findings": [{"id": "GHSA-one", "package": "demo", "ecosystem": "PyPI", "version": "2"}], "unresolved_packages": []}], True, False),
+    ([{"scan_status": "complete", "findings": [
+          {"id": f"GHSA-{index}", "package": "demo", "ecosystem": "PyPI", "version": "1"} for index in range(14)
+      ], "unresolved_packages": []},
+      {"scan_status": "complete", "findings": [
+          {"id": f"GHSA-{index}", "package": "demo", "ecosystem": "PyPI", "version": "2"} for index in range(12)
+      ], "unresolved_packages": []}], False, False),
+    ([{"scan_status": "complete", "findings": [{"id": "GHSA-release", "package": "demo", "ecosystem": "PyPI", "version": "1"}], "unresolved_packages": []},
+      {"scan_status": "complete", "findings": [{"id": "GHSA-release", "package": "demo", "ecosystem": "PyPI", "version": "2"}], "unresolved_packages": []}], False, True),
 ])
-def test_source_analysis_runs_independently_of_osv_and_preserves_other_results(tmp_path, monkeypatch, osv_results, source_fails):
+def test_source_analysis_runs_independently_of_osv_and_preserves_other_results(tmp_path, monkeypatch, osv_results, source_fails, release_fails):
     repository = tmp_path / "repo"
     repository.mkdir()
     (repository / ".git").mkdir()
@@ -443,9 +486,20 @@ def test_source_analysis_runs_independently_of_osv_and_preserves_other_results(t
             raise RuntimeError("source analysis unavailable")
         return [{"package": "demo", "ecosystem": "pypi", "locations": []}]
 
-    result = review.review_dependabot_pull_request(repository, "2", github_client=github, usage_analyzer=source_analysis)
+    def release_lookup(_changes):
+        if release_fails:
+            raise RuntimeError("release endpoint unavailable")
+        return []
+
+    result = review.review_dependabot_pull_request(
+        repository, "2", github_client=github, usage_analyzer=source_analysis,
+        release_context_lookup=release_lookup,
+    )
     assert any((item.get("package", {}).get("name") if isinstance(item.get("package"), dict) else item.get("package")) == "demo"
                for item in analyzed)
+    supplied_advisory_ids = {str(item.get("id")) for item in analyzed if not str(item.get("id", "")).startswith("source-analysis:")}
+    expected_pr_advisory_ids = {str(item["id"]) for item in osv_results[1]["findings"]} if not isinstance(osv_results[1], Exception) else set()
+    assert supplied_advisory_ids == expected_pr_advisory_ids
     expected_source_status = "failed" if source_fails else "completed_without_matches"
     assert result["summary"]["dependency_analyses"][0]["source_analysis_status"] == expected_source_status
     if isinstance(osv_results[0], Exception):
@@ -454,6 +508,11 @@ def test_source_analysis_runs_independently_of_osv_and_preserves_other_results(t
     if source_fails:
         assert result["summary"]["osv"]["remaining"] == 1
         assert result["osv_scans"]["base"]["status"] == "complete"
+    if release_fails:
+        assert result["status"] == "review_complete"
+        assert result["release_context"][0]["status"] == "lookup_failed"
+        assert result["summary"]["osv"]["remaining"] == 1
+        assert result["summary"]["dependency_analyses"][0]["source_analysis_status"] == "completed_without_matches"
 
 
 def test_actions_only_update_keeps_python_baseline_out_of_pr_delta():
@@ -474,7 +533,10 @@ def test_actions_only_update_keeps_python_baseline_out_of_pr_delta():
     })
     assert report["summary"]["osv"]["introduced"] == 0
     assert report["summary"]["osv"]["remaining"] == 0
-    assert report["summary"]["osv"]["unaffected"] == 1
+    assert report["summary"]["osv"]["unchanged_dependencies"] == 1
+    assert report["security_delta"]["unchanged_dependencies"][0]["package"] == "aiohttp"
+    assert "unaffected" not in report["security_delta"]
+    assert report["security_delta"]["version_assessment_counts"]["unchanged_dependencies"]["affected"] == 0
     assert "do not assess GitHub Actions" in report["summary"]["osv_scope_note"]
 
 
@@ -612,7 +674,7 @@ def test_compact_schema_serializes_complete_package_advisory_provenance():
         "security_delta": delta, "dependency_changes": [],
     })
     loaded = json.loads(json.dumps(report))
-    assert loaded["schema_version"] == 4
+    assert loaded["schema_version"] == 5
     advisory = loaded["security_delta"]["remaining"][0]["advisories"][0]
     assert advisory["finding_identity"] == "pypi:demo:ghsa-1"
     assert advisory["fixed_version_status"] == "unavailable"
@@ -645,7 +707,7 @@ def test_report_compaction_groups_advisories_and_limits_rag_locations():
             "retrieval": {"backend": "qdrant_local_hybrid"},
         }],
     })
-    assert report["schema_version"] == 4
+    assert report["schema_version"] == 5
     assert report["summary"]["osv"]["remaining"] == 6
     assert len(report["security_delta"]["remaining"]) == 1
     assert report["security_delta"]["remaining"][0]["advisory_count"] == 6
@@ -703,9 +765,9 @@ def test_pr_comment_uses_detailed_dependency_data_and_preserves_evidence_label()
     assert "stale-summary-entry" not in no_changes
 
 
-def test_report_v4_json_schema_and_per_dependency_source_statuses():
+def test_report_v5_json_schema_and_per_dependency_source_statuses():
     schema = evidence_report_json_schema()
-    assert schema["properties"]["schema_version"]["const"] == 4
+    assert schema["properties"]["schema_version"]["const"] == 5
     changes = [
         {"package": name, "ecosystem": "pypi", "base_version": "1.0", "head_version": "2.0",
          "relationship": relation, "dependency_paths": [[name]]}
@@ -729,6 +791,18 @@ def test_report_v4_json_schema_and_per_dependency_source_statuses():
     statuses = {item["package"]: item["source_analysis_status"] for item in report["summary"]["dependency_analyses"]}
     assert statuses == {"alpha": "completed_with_matches", "beta": "completed_without_matches"}
     assert validate_evidence_report(report) is report
+
+    legacy = json.loads(json.dumps(report))
+    legacy["schema_version"] = 4
+    legacy["validation"]["schema_version"] = 4
+    legacy["summary"]["osv"]["unaffected"] = legacy["summary"]["osv"].pop("unchanged_dependencies")
+    legacy_delta = legacy["security_delta"]
+    legacy_delta["unaffected"] = legacy_delta.pop("unchanged_dependencies")
+    legacy_delta["counts"]["unaffected"] = legacy_delta["counts"].pop("unchanged_dependencies")
+    legacy_delta["version_assessment_counts"]["unaffected"] = legacy_delta["version_assessment_counts"].pop("unchanged_dependencies")
+    for key in ("package_groups", "unique_advisory_ids", "underlying_vulnerabilities"):
+        legacy_delta["count_semantics"][key]["unaffected"] = legacy_delta["count_semantics"][key].pop("unchanged_dependencies")
+    assert validate_evidence_report(legacy) is legacy
 
 
 def test_pr_comment_is_compact_and_links_full_report_artifact():

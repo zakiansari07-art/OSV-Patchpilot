@@ -264,7 +264,7 @@ The Dependabot report uses a compact, navigable layout:
 - `summary`: recommendation, dependency update, test outcomes, OSV counts, and brief RAG summary.
 - `pull_request` and `dependency_changes`: PR identity and package version changes.
 - `tests`: compact base and PR test outcomes; useful error output is retained when setup or tests fail.
-- `osv_scans` and `security_delta`: package-advisory findings with installed versions, severity and affected/fixed range data when OSV supplies it, manifest provenance, dependency relationship/path, and references. Missing advisory metadata is marked unavailable. Findings are keyed by package, ecosystem, and advisory ID; `unique_advisory_count` is separate from package-advisory finding counts. Schema version 3 retains the prior introduced, resolved, remaining, unaffected, and not-assessed classifications.
+- `osv_scans` and `security_delta`: package-advisory findings with installed versions, severity and affected/fixed range data when OSV supplies it, manifest provenance, dependency relationship/path, and references. Missing advisory metadata is marked unavailable. Findings are keyed by package, ecosystem, and advisory ID; `unique_advisory_count` is separate from package-advisory finding counts. Schema version 5 classifies findings as introduced, resolved, remaining, in unchanged dependencies, or not assessed. Findings in unchanged dependencies can still be affected.
 - `source_usage`: up to three likely source locations per package, labeled as application or test code.
 - `release_context`: best-effort release notes or links where available.
 - `ai_review`: concise model assessment when analysis has run.

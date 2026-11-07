@@ -33,7 +33,7 @@ Mandatory rules:
 - Identify changed manifests, lockfiles, packages and versions.
 - Compare relevant base and PR dependency snapshots.
 - Associate findings with the correct package, ecosystem and version.
-- Support classifications: `introduced`, `resolved`, `remaining`, `unaffected`, `not_assessed`.
+- Support classifications: `introduced`, `resolved`, `remaining`, `unchanged_dependencies`, `not_assessed`. An unchanged dependency can still have affected OSV findings.
 - Never attribute unrelated baseline findings to a PR.
 - Do not associate Python lockfile findings with GitHub Actions updates.
 - Do not treat failed or incomplete scans as zero findings.
