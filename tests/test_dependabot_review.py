@@ -479,10 +479,11 @@ def test_source_analysis_runs_independently_of_osv_and_preserves_other_results(t
     monkeypatch.setattr(review, "_git", fake_git)
     monkeypatch.setattr(review, "_test", lambda *_: {"passed": True, "returncode": 0, "output": "passed"})
     monkeypatch.setattr(review, "_scan", scan)
-    monkeypatch.setattr(review, "_dependency_changes", lambda *_: [{
-        "package": "demo", "ecosystem": "pypi", "base_version": "1", "head_version": "2",
-        "relationship": "direct", "dependency_paths": [["demo"]],
-    }])
+    monkeypatch.setattr(review, "_dependency_changes", lambda *_: [
+        {"package": name, "ecosystem": "pypi", "base_version": "1", "head_version": "2",
+         "relationship": "direct", "dependency_paths": [[name]]}
+        for name in ("demo", "other")
+    ])
 
     def source_analysis(_root, inputs):
         analyzed.extend(inputs)
@@ -501,11 +502,17 @@ def test_source_analysis_runs_independently_of_osv_and_preserves_other_results(t
     )
     assert any((item.get("package", {}).get("name") if isinstance(item.get("package"), dict) else item.get("package")) == "demo"
                for item in analyzed)
+    analyzed_names = {
+        item.get("package", {}).get("name") if isinstance(item.get("package"), dict) else item.get("package")
+        for item in analyzed
+    }
+    assert analyzed_names == {"demo", "other"}
     supplied_advisory_ids = {str(item.get("id")) for item in analyzed if not str(item.get("id", "")).startswith("source-analysis:")}
     expected_pr_advisory_ids = {str(item["id"]) for item in osv_results[1]["findings"]} if not isinstance(osv_results[1], Exception) else set()
     assert supplied_advisory_ids == expected_pr_advisory_ids
     expected_source_status = "failed" if source_fails else "completed_without_matches"
     assert result["summary"]["dependency_analyses"][0]["source_analysis_status"] == expected_source_status
+    assert result["summary"]["dependency_analyses"][1]["source_analysis_status"] == expected_source_status
     if isinstance(osv_results[0], Exception):
         assert result["osv_scans"]["base"]["status"] == "failed"
         assert result["summary"]["dependency_analyses"][0]["osv_status"] == "failed"

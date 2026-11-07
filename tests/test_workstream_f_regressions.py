@@ -448,9 +448,54 @@ def test_comment_labels_limited_source_location_selection():
         ]}],
     }
     body = render_pr_comment(report, "")
-    assert "showing 3 of 6" in body
+    assert "showing 6 of 6" in body
     assert "src/module_3.py" in body
-    assert "src/module_4.py" not in body
+    assert "src/module_4.py" in body
+
+
+def test_comment_source_locations_are_selected_fairly_across_changed_packages():
+    report = {
+        "dependency_changes": [], "summary": {"dependency_updates": [], "tests": {}, "osv": {}},
+        "source_usage": [
+            {"package": "langchain", "locations": [
+                {"path": f"src/langchain_{i}.py", "line_start": i, "line_end": i,
+                 "evidence_classification": "direct_import", "area": "application"}
+                for i in range(1, 7)
+            ]},
+            {"package": "langchain-core", "locations": [
+                {"path": f"src/core_{i}.py", "line_start": i, "line_end": i,
+                 "evidence_classification": "direct_import", "area": "application"}
+                for i in range(1, 4)
+            ]},
+        ],
+    }
+    body = render_pr_comment(report, "")
+    assert "showing 6 of 9" in body
+    assert "`langchain-core`: `src/core_1.py:1-1`" in body
+    assert "`langchain-core`: `src/core_2.py:2-2`" in body
+
+
+def test_ai_review_does_not_conflate_osv_affected_version_with_application_reachability():
+    report = {
+        "dependency_changes": [{"package": "langchain-core", "relationship": "transitive"}],
+        "security_delta": {"remaining": [{"package": "langchain-core", "advisories": [{
+            "version_assessment": {"status": "affected"},
+        }]}]},
+        "source_usage": [{"package": "langchain-core", "relationship": "transitive",
+                          "source_usage_classifications": ["direct_import"],
+                          "vulnerability_reachability": [{"status": "unknown"}],
+                          "locations": [{"path": "src/agent.py", "line_start": 9,
+                                         "evidence_classification": "direct_import", "area": "application"}]}],
+    }
+    ai_text = (
+        "The installed langchain-core version is affected according to OSV. "
+        "langchain-core is directly affected by known vulnerabilities. "
+        "Production code imports langchain-core, but vulnerable API reachability is unknown."
+    )
+    clean = _sanitize_ai_review(report, ai_text)
+    assert "installed langchain-core version is affected according to OSV" in clean
+    assert "directly affected by known vulnerabilities" not in clean
+    assert "Production code imports" not in clean
 
 
 def test_comment_surfaces_release_retrieval_and_no_notes_separately():
@@ -561,6 +606,8 @@ def test_recommendation_never_suggests_fixed_version_that_conflicts_with_parent(
     if "conflict" in expected:
         assert "parent or coordinated dependency upgrade is needed" in recommendation
         assert "do not upgrade this package in isolation" in recommendation
+        assert "langchain (^0.2.0)" in recommendation
+        assert "no compatible coordinated version set is established by the available metadata" in recommendation
 
 
 def test_source_usage_field_is_neutral_and_legacy_report_is_normalized():
