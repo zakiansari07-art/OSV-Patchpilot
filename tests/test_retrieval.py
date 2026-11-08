@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import hashlib
-import json
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -9,14 +8,18 @@ import pytest
 
 from vulnerability_agent.retrieval import (
     LocalCodeRetriever,
+    _enrich_chunk_metadata,
+    _package_evidence,
+    _package_ranked_ids,
     _trace_locations,
     bm25_rank,
     chunk_source,
     reciprocal_rank_fusion,
     render_context,
 )
+from vulnerability_agent.package_imports import distribution_import_modules, package_search_terms
 from vulnerability_agent.dependencies import AgentDependencies
-from vulnerability_agent.nodes import patching, usage_analysis
+from vulnerability_agent.nodes import usage_analysis
 
 
 def test_python_code_is_chunked_by_function_with_line_metadata():
@@ -54,44 +57,6 @@ def test_code_chunker_rejects_sensitive_and_non_code_paths():
     assert chunk_source(".env.py", "SECRET = 'value'") == []
     assert chunk_source("credentials/client.py", "def fetch(): pass") == []
     assert chunk_source("src/package-lock.json", '{"name": "demo"}') == []
-
-
-def test_source_candidates_accept_filesystem_server_root_object(tmp_path, monkeypatch):
-    tree = json.dumps({
-        "name": "demo-repo",
-        "type": "directory",
-        "children": [
-            {"name": "app.py", "type": "file"},
-            {"name": "tests", "type": "directory", "children": [
-                {"name": "test_app.py", "type": "file"},
-            ]},
-            {"name": ".env", "type": "file"},
-        ],
-    })
-    monkeypatch.setattr(
-        patching, "find_package_usage_files", lambda *_args: set(),
-    )
-
-    candidates = patching._tree_source_candidates(tree, tmp_path, "jinja2")
-
-    assert candidates == ["app.py", "tests/test_app.py"]
-
-
-def test_source_candidates_fall_back_to_git_tracked_files_when_mcp_tree_is_unrecognized(tmp_path, monkeypatch):
-    monkeypatch.setattr(patching, "find_package_usage_files", lambda *_args: set())
-    monkeypatch.setattr(
-        patching.subprocess,
-        "run",
-        lambda *_args, **_kwargs: SimpleNamespace(
-            returncode=0,
-            stdout="app.py\0tests/test_app.py\0.env.py\0package-lock.json\0",
-            stderr="",
-        ),
-    )
-
-    candidates = patching._tree_source_candidates('{"tree": []}', tmp_path, "aiohttp")
-
-    assert candidates == ["app.py", "tests/test_app.py"]
 
 
 def test_zero_chunk_rag_index_uses_literal_fallback_for_report_only_locations(tmp_path, monkeypatch):
@@ -140,7 +105,8 @@ def test_zero_chunk_rag_index_uses_literal_fallback_for_report_only_locations(tm
     assert analysis["retrieval"]["backend"] == "qdrant_local_hybrid"
     assert analysis["retrieval"]["fallback"] == "literal package search"
     assert analysis["locations"][0]["path"] == "app.py"
-    assert analysis["locations"][0]["symbol"] == "text match"
+    assert analysis["locations"][0]["symbol"] == "import statement"
+    assert analysis["locations"][0]["evidence_classification"] == "direct_import"
     assert "render_report" in analysis["locations"][0]["excerpt"]
     assert "not prove" in analysis["note"]
 
@@ -180,6 +146,127 @@ def test_reciprocal_rank_fusion_rewards_results_found_by_both_retrievers():
     )
 
     assert fused == ["shared", "keyword-only", "vector-only"]
+
+
+def _indexed_chunk(path: str, source: str, symbol: str) -> dict:
+    chunk = next(chunk for chunk in chunk_source(path, source) if chunk["symbol"] == symbol)
+    return _enrich_chunk_metadata(path, source, chunk)
+
+
+def test_package_import_mapping_includes_nonmatching_distribution_names():
+    assert "git" in distribution_import_modules("GitPython")
+    assert "dotenv" in distribution_import_modules("python-dotenv")
+    assert "PIL" in distribution_import_modules("Pillow")
+    assert "dotenv" in package_search_terms("python-dotenv")
+    assert "pytest" in distribution_import_modules("pytest-asyncio")
+
+
+def test_package_evidence_detects_aliased_production_api_usage():
+    document = _indexed_chunk(
+        "src/client.py",
+        "import requests as http\n\ndef fetch(url):\n    return http.get(url)\n",
+        "fetch",
+    )
+
+    assert document["source_area"] == "production"
+    assert document["used_import_bindings"] == ["http"]
+    assert _package_evidence(document, "requests") == "api_usage"
+
+
+def test_package_evidence_detects_submodule_and_from_import_aliases():
+    version = _indexed_chunk(
+        "src/versions.py",
+        "from packaging.version import Version as V\n\ndef parse(value):\n    return V(value)\n",
+        "parse",
+    )
+    dotenv = _indexed_chunk(
+        "src/config.py",
+        "from dotenv import load_dotenv as load\n\ndef configure():\n    load()\n",
+        "configure",
+    )
+
+    assert _package_evidence(version, "packaging") == "api_usage"
+    assert _package_evidence(dotenv, "python-dotenv") == "api_usage"
+
+
+def test_package_evidence_keeps_tests_and_mocks_out_of_production_usage():
+    document = _indexed_chunk(
+        "tests/test_client.py",
+        "from sendgrid import SendGridAPIClient\n\ndef test_delivery():\n    client = SendGridAPIClient()\n    assert client.send('message')\n",
+        "test_delivery",
+    )
+
+    assert document["source_area"] == "test"
+    assert _package_evidence(document, "sendgrid") == "test_only"
+
+
+def test_package_evidence_recognizes_a_mocked_symbol_from_another_module():
+    document = _indexed_chunk(
+        "tests/test_delivery.py",
+        "def test_delivery(monkeypatch):\n"
+        "    class FakeSendGrid: pass\n"
+        "    monkeypatch.setattr(agent_module, 'SendGridAPIClient', FakeSendGrid)\n",
+        "test_delivery",
+    )
+
+    assert _package_evidence(
+        document, "sendgrid", query="sendgrid mocked test delivery",
+        package_symbols={"SendGridAPIClient"},
+    ) == "test_only"
+    assert _package_evidence(
+        document, "sendgrid", query="advisory release context includes tests",
+        package_symbols={"SendGridAPIClient"}, test_context=False,
+    ) is None
+
+
+def test_package_evidence_drops_unrelated_semantic_chunks_but_keeps_literal_context():
+    unrelated = _indexed_chunk(
+        "src/workflow.py",
+        "def process_request(value):\n    return handle(value)\n",
+        "process_request",
+    )
+    context = _indexed_chunk(
+        "src/workflow.py",
+        "def explain():\n    return 'requests configure an HTTP client'\n",
+        "explain",
+    )
+
+    assert _package_evidence(unrelated, "requests") is None
+    assert _package_evidence(context, "requests") == "semantic_context"
+
+
+def test_package_ranking_prioritizes_verified_production_over_weak_context():
+    production = _indexed_chunk(
+        "src/client.py", "import httpx\n\ndef fetch():\n    return httpx.get('/')\n", "fetch",
+    )
+    test = _indexed_chunk(
+        "tests/test_client.py", "import httpx\n\ndef test_fetch():\n    return httpx.get('/')\n", "test_fetch",
+    )
+    unrelated = _indexed_chunk(
+        "src/workflow.py", "def fetch():\n    return handle_request()\n", "fetch",
+    )
+    for index, item in enumerate((production, test, unrelated)):
+        item["id"] = str(index)
+
+    assert _package_evidence(unrelated, "httpx") is None
+    assert _package_ranked_ids([production, test, unrelated], ["1", "2", "0"], "httpx") == ["0", "1", "2"]
+
+
+def test_semantic_context_is_retained_only_when_repository_has_package_evidence():
+    production = _indexed_chunk(
+        "src/client.py", "import requests\n\ndef fetch():\n    return requests.get('/')\n", "fetch",
+    )
+    generic = _indexed_chunk(
+        "src/workflow.py", "def handle():\n    return process_request()\n", "handle",
+    )
+    unrelated = _indexed_chunk(
+        "src/workflow.py", "def handle():\n    return process_request()\n", "handle",
+    )
+    for index, item in enumerate((production, generic, unrelated)):
+        item["id"] = str(index)
+
+    assert _package_ranked_ids([production, generic], ["1"], "requests") == ["0", "1"]
+    assert _package_ranked_ids([unrelated], ["2"], "requests") == []
 
 
 def test_traceback_paths_are_extracted_and_context_has_reviewable_locations():
@@ -236,93 +323,3 @@ def fetch_data(url):
     persisted_results = reopened.retrieve(repository, "requests fetch_data", limit=3)
     reopened.client.close()
     assert persisted_results[0]["path"] == "src/client.py"
-
-
-def test_patch_planner_does_not_retrieve_or_prompt_with_source_context(tmp_path):
-    (tmp_path / "requirements.txt").write_text("demo==1.0\n", encoding="utf-8")
-    (tmp_path / "app.py").write_text("def use_demo():\n    return True\n", encoding="utf-8")
-    captured = {}
-
-    class FakeTools:
-        audit_log = type("Audit", (), {"database_path": tmp_path / "audit.sqlite3"})()
-
-        def call(self, _server, _root, tool, args):
-            if tool == "read_text_file":
-                return Path(args["path"]).read_text(encoding="utf-8")
-            raise AssertionError(f"Unexpected MCP tool: {tool}")
-
-    class FakeRetriever:
-        def has_index(self, *_args, **_kwargs):
-            raise AssertionError("Patch planning must not access the source retriever")
-
-    class FakeModel:
-        def invoke(self, prompt):
-            captured["prompt"] = prompt
-            return SimpleNamespace(content=json.dumps({
-                "plan": "Update demo", "edits": [{
-                    "file": "requirements.txt", "old": "demo==1.0\n", "new": "demo==2.0\n",
-                }],
-            }))
-
-    deps = AgentDependencies(tools=FakeTools(), model=FakeModel(), code_retriever=FakeRetriever())
-    state = {
-        "repo_path": str(tmp_path), "main_repo_path": str(tmp_path),
-        "manifest_path": "requirements.txt",
-        "current_vuln": {"id": "OSV-DEMO", "summary": "demo advisory", "package": {"name": "demo"}},
-        "failure_log": "AssertionError: expected remediation behavior",
-        "patch_code": {}, "original_files": {}, "attempt_count": 1,
-        "manifest_path": "requirements.txt",
-    }
-
-    result = patching.node_investigate_and_plan(state, deps)
-
-    assert "AssertionError" in captured["prompt"]
-    assert "app.py" not in captured["prompt"]
-    assert "return True" not in captured["prompt"]
-    assert "dependency declaration files only" in captured["prompt"]
-    assert "source_context" not in result
-    assert "retrieval_status" not in result
-
-
-def test_patch_planner_rejects_application_source_edits(tmp_path):
-    (tmp_path / "requirements.txt").write_text("demo==1.0\n", encoding="utf-8")
-
-    class FakeTools:
-        audit_log = type("Audit", (), {"database_path": tmp_path / "audit.sqlite3"})()
-
-        def call(self, _server, _root, tool, args):
-            assert tool == "read_text_file"
-            return Path(args["path"]).read_text(encoding="utf-8")
-
-    class SourceEditModel:
-        def invoke(self, _prompt):
-            return SimpleNamespace(content=json.dumps({
-                "plan": "Change application code", "edits": [{
-                    "file": "app.py", "old": "unsafe()", "new": "safe()",
-                }],
-            }))
-
-    deps = AgentDependencies(tools=FakeTools(), model=SourceEditModel())
-    state = {
-        "repo_path": str(tmp_path), "manifest_path": "requirements.txt",
-        "current_vuln": {"id": "OSV-DEMO", "package": {"name": "demo"}},
-        "patch_code": {}, "original_files": {}, "attempt_count": 1,
-    }
-
-    with pytest.raises(ValueError, match="not an allowed dependency declaration"):
-        patching.node_investigate_and_plan(state, deps)
-
-
-def test_apply_patch_rejects_source_files_before_creating_a_branch(tmp_path):
-    class FakeDependencies:
-        def git_call(self, *_args, **_kwargs):
-            raise AssertionError("A rejected source patch must not create a branch")
-
-    result = patching.node_apply_patch({
-        "repo_path": str(tmp_path), "manifest_path": "requirements.txt",
-        "current_vuln": {"package": {"name": "demo"}},
-        "patch_code": {"app.py": "unsafe()\n"},
-    }, FakeDependencies())
-
-    assert result["error_code"] == "non_dependency_edit_rejected"
-    assert "app.py" in result["error"]

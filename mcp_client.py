@@ -113,8 +113,7 @@ class MCPPolicyProxy:
     The audit deliberately excludes arguments because they may contain source.
     """
     ALLOWED = {
-        "filesystem": {"read_text_file", "read_multiple_files", "directory_tree", "write_file"},
-        "git": {"git_status", "git_create_branch", "git_add", "git_commit"},
+        "filesystem": {"read_text_file", "read_multiple_files"},
     }
 
     def __init__(self, client: Any, *, database_path: str | Path | None = None, run_id: str = "default") -> None:
@@ -168,23 +167,7 @@ class MCPPolicyProxy:
             else:
                 if "path" not in args:
                     raise MCPPolicyError("Filesystem MCP request is missing its path")
-                args["path"] = str(root / self._safe_relative(root, str(args["path"]), allow_root=tool == "directory_tree"))
-        else:
-            requested_root = Path(str(args.get("repo_path", repo_path))).expanduser().resolve()
-            if requested_root != root:
-                raise MCPPolicyError("Git MCP request must target the selected repository")
-            args["repo_path"] = str(root)
-            if tool == "git_create_branch":
-                branch = str(args.get("branch_name", ""))
-                if not re.fullmatch(r"security/[A-Za-z0-9._/-]+", branch) or ".." in branch.split("/"):
-                    raise MCPPolicyError("Git MCP may create only safe security/* branches")
-            elif tool == "git_add":
-                files = args.get("files")
-                if not isinstance(files, list) or not files:
-                    raise MCPPolicyError("Git MCP staging requires an explicit non-empty file list")
-                args["files"] = [self._safe_relative(root, str(item)) for item in files]
-            elif tool == "git_commit" and not str(args.get("message", "")).startswith("fix(security):"):
-                raise MCPPolicyError("Git MCP commit message must use the fix(security): prefix")
+                args["path"] = str(root / self._safe_relative(root, str(args["path"])))
         return root, args
 
     def call(self, server: str, repo_path: str, tool: str, arguments: dict[str, Any]) -> str:
