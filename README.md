@@ -34,7 +34,8 @@ The repository does not include captured UI screenshots or a LangSmith trace yet
 | LangSmith trace GIF | Review graph nodes from collection through analysis, with sensitive values hidden. | `docs/assets/langsmith-review-trace.gif` |
 | Review report | Summary of base/PR tests, OSV delta, and labeled source locations. | `docs/assets/dependabot-review-report.png` |
 | GitHub comment | Final concise comment with evidence-artifact link and collapsed AI assessment. | `docs/assets/dependabot-review-comment.png` |
-| Actions handoff | Evidence artifact produced by the first workflow and consumed by the trusted comment workflow. | `docs/assets/actions-evidence-handoff.png` |
+| Actions handoff | Evidence artifact produced by the first workflow and consumed by the trusted comment workflow. | `docs/assets/github-action-evidence-workflow` |
+| Actions handoff | Comment artifact produced by the first workflow and consumed by the trusted comment workflow. | `docs/assets/github-action-evidence-workflow` |
 
 <!-- Replace the comments below with image links after adding reviewed captures. -->
 
