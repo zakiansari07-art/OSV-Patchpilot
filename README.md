@@ -15,7 +15,7 @@ The screenshots and recording below are placeholders for sanitized captures. Add
 Lead with the user-facing result: show the dependency change, base/PR test outcomes, OSV delta, source clues, artifact link, and expandable AI assessment.
 
 <!-- Add docs/assets/dependabot-review-comment.png -->
-<!-- ![OSV Patchpilot review comment on a Dependabot pull request](docs/assets/dependabot-review-comment.png) -->
+<!-![OSV Patchpilot review comment on a Dependabot pull request](docs/assets/dependabot-review-comment.png) -->
 
 ### 2. Structured JSON evidence report
 
