@@ -9,12 +9,16 @@ import pytest
 
 from vulnerability_agent.retrieval import (
     LocalCodeRetriever,
+    _enrich_chunk_metadata,
+    _package_evidence,
+    _package_ranked_ids,
     _trace_locations,
     bm25_rank,
     chunk_source,
     reciprocal_rank_fusion,
     render_context,
 )
+from vulnerability_agent.package_imports import distribution_import_modules, package_search_terms
 from vulnerability_agent.dependencies import AgentDependencies
 from vulnerability_agent.nodes import patching, usage_analysis
 
@@ -181,6 +185,127 @@ def test_reciprocal_rank_fusion_rewards_results_found_by_both_retrievers():
     )
 
     assert fused == ["shared", "keyword-only", "vector-only"]
+
+
+def _indexed_chunk(path: str, source: str, symbol: str) -> dict:
+    chunk = next(chunk for chunk in chunk_source(path, source) if chunk["symbol"] == symbol)
+    return _enrich_chunk_metadata(path, source, chunk)
+
+
+def test_package_import_mapping_includes_nonmatching_distribution_names():
+    assert "git" in distribution_import_modules("GitPython")
+    assert "dotenv" in distribution_import_modules("python-dotenv")
+    assert "PIL" in distribution_import_modules("Pillow")
+    assert "dotenv" in package_search_terms("python-dotenv")
+    assert "pytest" in distribution_import_modules("pytest-asyncio")
+
+
+def test_package_evidence_detects_aliased_production_api_usage():
+    document = _indexed_chunk(
+        "src/client.py",
+        "import requests as http\n\ndef fetch(url):\n    return http.get(url)\n",
+        "fetch",
+    )
+
+    assert document["source_area"] == "production"
+    assert document["used_import_bindings"] == ["http"]
+    assert _package_evidence(document, "requests") == "api_usage"
+
+
+def test_package_evidence_detects_submodule_and_from_import_aliases():
+    version = _indexed_chunk(
+        "src/versions.py",
+        "from packaging.version import Version as V\n\ndef parse(value):\n    return V(value)\n",
+        "parse",
+    )
+    dotenv = _indexed_chunk(
+        "src/config.py",
+        "from dotenv import load_dotenv as load\n\ndef configure():\n    load()\n",
+        "configure",
+    )
+
+    assert _package_evidence(version, "packaging") == "api_usage"
+    assert _package_evidence(dotenv, "python-dotenv") == "api_usage"
+
+
+def test_package_evidence_keeps_tests_and_mocks_out_of_production_usage():
+    document = _indexed_chunk(
+        "tests/test_client.py",
+        "from sendgrid import SendGridAPIClient\n\ndef test_delivery():\n    client = SendGridAPIClient()\n    assert client.send('message')\n",
+        "test_delivery",
+    )
+
+    assert document["source_area"] == "test"
+    assert _package_evidence(document, "sendgrid") == "test_only"
+
+
+def test_package_evidence_recognizes_a_mocked_symbol_from_another_module():
+    document = _indexed_chunk(
+        "tests/test_delivery.py",
+        "def test_delivery(monkeypatch):\n"
+        "    class FakeSendGrid: pass\n"
+        "    monkeypatch.setattr(agent_module, 'SendGridAPIClient', FakeSendGrid)\n",
+        "test_delivery",
+    )
+
+    assert _package_evidence(
+        document, "sendgrid", query="sendgrid mocked test delivery",
+        package_symbols={"SendGridAPIClient"},
+    ) == "test_only"
+    assert _package_evidence(
+        document, "sendgrid", query="advisory release context includes tests",
+        package_symbols={"SendGridAPIClient"}, test_context=False,
+    ) is None
+
+
+def test_package_evidence_drops_unrelated_semantic_chunks_but_keeps_literal_context():
+    unrelated = _indexed_chunk(
+        "src/workflow.py",
+        "def process_request(value):\n    return handle(value)\n",
+        "process_request",
+    )
+    context = _indexed_chunk(
+        "src/workflow.py",
+        "def explain():\n    return 'requests configure an HTTP client'\n",
+        "explain",
+    )
+
+    assert _package_evidence(unrelated, "requests") is None
+    assert _package_evidence(context, "requests") == "semantic_context"
+
+
+def test_package_ranking_prioritizes_verified_production_over_weak_context():
+    production = _indexed_chunk(
+        "src/client.py", "import httpx\n\ndef fetch():\n    return httpx.get('/')\n", "fetch",
+    )
+    test = _indexed_chunk(
+        "tests/test_client.py", "import httpx\n\ndef test_fetch():\n    return httpx.get('/')\n", "test_fetch",
+    )
+    unrelated = _indexed_chunk(
+        "src/workflow.py", "def fetch():\n    return handle_request()\n", "fetch",
+    )
+    for index, item in enumerate((production, test, unrelated)):
+        item["id"] = str(index)
+
+    assert _package_evidence(unrelated, "httpx") is None
+    assert _package_ranked_ids([production, test, unrelated], ["1", "2", "0"], "httpx") == ["0", "1", "2"]
+
+
+def test_semantic_context_is_retained_only_when_repository_has_package_evidence():
+    production = _indexed_chunk(
+        "src/client.py", "import requests\n\ndef fetch():\n    return requests.get('/')\n", "fetch",
+    )
+    generic = _indexed_chunk(
+        "src/workflow.py", "def handle():\n    return process_request()\n", "handle",
+    )
+    unrelated = _indexed_chunk(
+        "src/workflow.py", "def handle():\n    return process_request()\n", "handle",
+    )
+    for index, item in enumerate((production, generic, unrelated)):
+        item["id"] = str(index)
+
+    assert _package_ranked_ids([production, generic], ["1"], "requests") == ["0", "1"]
+    assert _package_ranked_ids([unrelated], ["2"], "requests") == []
 
 
 def test_traceback_paths_are_extracted_and_context_has_reviewable_locations():
