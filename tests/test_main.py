@@ -1,5 +1,7 @@
 import json
 
+import pytest
+
 import main
 
 
@@ -18,121 +20,105 @@ def test_source_analysis_placeholder_keeps_package_metadata_and_is_not_osv_findi
     assert groups[0]["relationship"] == "transitive"
 
 
-class FakeWorkflow:
-    def invoke(self, state, config=None):
-        return {
-            **state,
-            "run_status": "no_findings",
-            "package_count": 3,
-            "manifest_path": "uv.lock",
-            "vulnerabilities": [],
-            "scan_warnings": [],
-            "test_history": [],
-        }
-
-    def get_state(self, config):
-        return type("Snapshot", (), {"next": ()})()
-
-
-class FakePersistence:
-    def __init__(self, database_path):
-        self.checkpointer = object()
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, *args):
-        return None
-
-
-def test_cli_writes_json_report_and_returns_success_for_clean_scan(tmp_path, monkeypatch, capsys):
-    repo = tmp_path / "repo"
-    repo.mkdir()
-    (repo / ".git").mkdir()
-    report_path = tmp_path / "agent-report.json"
-    saved_report_directory = tmp_path / "saved report"
-    monkeypatch.setattr(main, "DEFAULT_REPORT_DIRECTORY", saved_report_directory)
-    monkeypatch.setattr(main, "build_graph", lambda **kwargs: FakeWorkflow())
-    monkeypatch.setattr(main, "SQLiteAgentPersistence", FakePersistence)
-
-    code = main.main([str(repo), "--report", str(report_path), "--state-db", str(tmp_path / "state.sqlite3")])
-
-    report = json.loads(report_path.read_text())
-    archived_reports = list(saved_report_directory.glob("run-*.json"))
-    assert code == 0
-    assert len(archived_reports) == 1
-    assert json.loads(archived_reports[0].read_text()) == report
-    assert report["status"] == "no_findings"
-    assert report["packages_checked"] == 3
-    assert report["phases"][0] == {"name": "scan", "status": "no_findings"}
-    assert report["model"]["provider"] == "openai"
-    assert json.loads(capsys.readouterr().out)["status"] == "no_findings"
-
-
-def test_cli_saves_report_automatically_when_report_path_is_not_given(tmp_path, monkeypatch, capsys):
-    repo = tmp_path / "repo"
-    repo.mkdir()
-    (repo / ".git").mkdir()
-    report_directory = tmp_path / "saved report"
-    monkeypatch.setattr(main, "DEFAULT_REPORT_DIRECTORY", report_directory)
-    monkeypatch.setattr(main, "build_graph", lambda **kwargs: FakeWorkflow())
-    monkeypatch.setattr(main, "SQLiteAgentPersistence", FakePersistence)
-
-    code = main.main([str(repo), "--state-db", str(tmp_path / "state.sqlite3")])
-
-    reports = list(report_directory.glob("run-*.json"))
-    assert code == 0
-    assert len(reports) == 1
-    saved = json.loads(reports[0].read_text())
-    printed = json.loads(capsys.readouterr().out)
-    assert saved["status"] == "no_findings"
-    assert saved == printed
-
-
-def test_approve_flag_discovers_and_resumes_pending_thread(tmp_path, monkeypatch, capsys):
-    repo = tmp_path / "repo"
-    repo.mkdir()
-    shared = {"approved": False, "invoked": False, "next": ("await_approval",)}
-    state = {
-        "repo_path": str(tmp_path / "worktree"),
-        "main_repo_path": str(repo),
-        "run_status": "awaiting_human_review",
-        "current_vuln": {"id": "GHSA-DEMO", "package": {"name": "demo"}},
-        "branch_name": "security/fix-demo-ghsa-demo",
-        "changed_files": ["requirements.txt"],
+def _complete_report():
+    return {
+        "schema_version": 6,
+        "mode": "dependabot_pr_review",
+        "status": "review_complete",
+        "repository_full_name": "acme/demo",
+        "pull_request": {
+            "number": 17,
+            "author": "dependabot[bot]",
+            "head_sha": "abc123",
+        },
     }
 
-    class ApprovalWorkflow:
-        def get_state(self, _config):
-            return type("Snapshot", (), {"next": shared["next"], "values": state})()
 
-        def update_state(self, _config, update):
-            shared["approved"] = update.get("approval_granted") is True
+class FakeReviewGraph:
+    def __init__(self, report=None):
+        self.report = report or _complete_report()
+        self.invocations = []
 
-        def invoke(self, _state, config=None):
-            assert config["configurable"]["thread_id"] == "pending-thread"
-            assert shared["approved"] is True
-            shared["invoked"] = True
-            shared["next"] = ()
-            state["run_status"] = "pull_request_created"
-            state["pr_url"] = "https://github.com/example/demo/pull/1"
-            return state
+    def invoke(self, state):
+        self.invocations.append(state)
+        return {"report": self.report}
 
-    class ApprovalPersistence(FakePersistence):
-        def list_thread_ids(self):
-            return ["pending-thread"]
 
-    workflow = ApprovalWorkflow()
-    monkeypatch.setattr(main, "build_graph", lambda **_kwargs: workflow)
-    monkeypatch.setattr(main, "SQLiteAgentPersistence", ApprovalPersistence)
-    monkeypatch.setattr(main, "DEFAULT_REPORT_DIRECTORY", tmp_path / "saved report")
+def _install_fake_graph(monkeypatch, graph):
+    monkeypatch.setattr(main, "build_dependabot_review_graph", lambda **_kwargs: graph)
 
-    code = main.main(["--approve", "--state-db", str(tmp_path / "state.sqlite3")])
 
-    output = capsys.readouterr()
-    report = json.loads(output.out)
+def test_cli_collects_dependabot_review_and_archives_json(tmp_path, monkeypatch, capsys):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / ".git").mkdir()
+    report_path = tmp_path / "evidence.json"
+    report_directory = tmp_path / "saved report"
+    monkeypatch.setattr(main, "DEFAULT_REPORT_DIRECTORY", report_directory)
+    graph = FakeReviewGraph()
+    _install_fake_graph(monkeypatch, graph)
+
+    code = main.main([
+        str(repo), "--review-pr", "17", "--collect-only",
+        "--report", str(report_path), "--state-db", str(tmp_path / "audit.sqlite3"),
+    ])
+
+    report = json.loads(report_path.read_text())
+    archived = list(report_directory.glob("review-*.json"))
     assert code == 0
-    assert shared == {"approved": True, "invoked": True, "next": ()}
-    assert "Approving demo / GHSA-DEMO" in output.err
-    assert report["observability"]["thread_id"] == "pending-thread"
-    assert report["pull_request_url"] == "https://github.com/example/demo/pull/1"
+    assert graph.invocations[0]["repository"] == str(repo)
+    assert graph.invocations[0]["pull_request"] == "17"
+    assert graph.invocations[0]["collect_only"] is True
+    assert len(archived) == 1
+    assert json.loads(archived[0].read_text()) == report
+    assert json.loads(capsys.readouterr().out)["status"] == "review_complete"
+
+
+def test_cli_analyzes_a_collected_report_and_validates_comment_identity(tmp_path, monkeypatch, capsys):
+    evidence = tmp_path / "evidence.json"
+    evidence.write_text(json.dumps(_complete_report()))
+    report_directory = tmp_path / "saved report"
+    monkeypatch.setattr(main, "DEFAULT_REPORT_DIRECTORY", report_directory)
+    graph = FakeReviewGraph()
+    _install_fake_graph(monkeypatch, graph)
+
+    code = main.main([
+        "--analyze-report", str(evidence), "--post-comment",
+        "--report-artifact-url", "https://github.com/acme/demo/actions/runs/123/artifacts/456",
+        "--expected-pr", "17", "--expected-repository", "acme/demo", "--expected-head-sha", "abc123",
+    ])
+
+    assert code == 0
+    assert graph.invocations[0]["post_comment"] is True
+    assert graph.invocations[0]["report"]["report_artifact_url"].endswith("artifacts/456")
+    saved = list(report_directory.glob("review-*.json"))
+    assert len(saved) == 1
+    assert json.loads(capsys.readouterr().out)["status"] == "review_complete"
+
+
+def test_cli_rejects_collected_report_for_different_pr(tmp_path):
+    evidence = tmp_path / "evidence.json"
+    evidence.write_text(json.dumps(_complete_report()))
+
+    with pytest.raises(SystemExit) as error:
+        main.main([
+            "--analyze-report", str(evidence), "--post-comment",
+            "--expected-pr", "18", "--expected-repository", "acme/demo", "--expected-head-sha", "abc123",
+        ])
+
+    assert error.value.code == 2
+
+
+def test_cli_exposes_only_dependabot_review_commands(capsys):
+    with pytest.raises(SystemExit) as help_exit:
+        main.main(["--help"])
+    assert help_exit.value.code == 0
+    help_text = capsys.readouterr().out
+    assert "--review-pr" in help_text
+    assert "--analyze-report" in help_text
+    assert "--approve" not in help_text
+    assert "--resume" not in help_text
+
+    with pytest.raises(SystemExit) as removed_command:
+        main.main(["--approve"])
+    assert removed_command.value.code == 2

@@ -17,7 +17,9 @@ from vulnerability_agent.retrieval import (  # noqa: E402
     chunk_source,
 )
 
-DATASET = Path(__file__).with_name("cases.json")
+DATASET = Path(__file__).with_name("cases-v3.json")
+BASELINE = Path(__file__).with_name("baseline-v3.json")
+EVALUATION_VERSION = 3
 TOP_K = 5
 EXCLUDED_DIRS = {".git", ".venv", "venv", "node_modules", "__pycache__", "saved report", "evals"}
 EVIDENCE_CLASSES = {
@@ -246,8 +248,8 @@ def validate_evaluation_ids(dataset_cases: list[dict[str, Any]], result_cases: l
 
 def validate_baseline(dataset: dict[str, Any], baseline: dict[str, Any]) -> None:
     """Check coverage and recompute every metric from stored retrieved chunks."""
-    if baseline.get("evaluation_version") != 2:
-        raise ValueError("Unsupported baseline evaluation_version; expected v2")
+    if baseline.get("evaluation_version") != dataset.get("dataset_version"):
+        raise ValueError("Baseline evaluation_version does not match the labelled dataset")
     if baseline.get("retrieval_limit") != TOP_K:
         raise ValueError(f"Baseline retrieval_limit must remain {TOP_K}")
     if baseline.get("embedding_model") != DEFAULT_EMBEDDING_MODEL:
@@ -308,7 +310,7 @@ def evaluate(output: Path | None = None) -> dict[str, Any]:
 
     validate_evaluation_ids(dataset["cases"], case_results)
     result = {
-        "evaluation_version": 2,
+        "evaluation_version": dataset["dataset_version"],
         "dataset_version": dataset["dataset_version"],
         "retriever": "LocalCodeRetriever",
         "embedding_model": DEFAULT_EMBEDDING_MODEL,
@@ -333,7 +335,7 @@ def evaluate(output: Path | None = None) -> dict[str, Any]:
 
 
 if __name__ == "__main__":
-    destination = Path(sys.argv[1]) if len(sys.argv) > 1 else Path(__file__).with_name("results-v2-precision-update.json")
+    destination = Path(sys.argv[1]) if len(sys.argv) > 1 else BASELINE
     measured = evaluate(destination)
     print(json.dumps(measured["summary"], indent=2, sort_keys=True))
     print(f"Per-case results written to {destination}")

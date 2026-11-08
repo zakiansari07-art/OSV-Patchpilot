@@ -1,10 +1,9 @@
 # RAG retrieval evaluation
 
-This versioned benchmark evaluates the production `LocalCodeRetriever` using
-Qdrant, FastEmbed, BM25, dense retrieval, RRF and AST-based source chunks. The
-historical v2 baseline remains frozen; the package-aware implementation result
-is recorded separately in `results-v2-precision-update.json` and explained in
-`precision-update-v2.md`.
+The active benchmark evaluates the production `LocalCodeRetriever` used by the
+Dependabot review workflow. It preserves Qdrant, FastEmbed, BM25, dense
+retrieval, RRF and AST-based source chunks. The active review-focused dataset
+is `cases-v3.json`; `baseline-v3.json` is its measured baseline.
 
 ## Run and validate
 
@@ -12,93 +11,74 @@ From the repository root, with `requirements.txt` installed and the configured
 FastEmbed model available locally:
 
 ```sh
-python evals/rag/evaluate.py evals/rag/results-v2-precision-update.json
-python -m pytest -q
+python evals/rag/evaluate.py
+python -m pytest -q tests/test_rag_evaluation.py
 ```
 
-The runner creates a temporary local Qdrant index and writes measured per-case
-results to a separate artifact. The historical `baseline.json` is frozen and
-must not be overwritten. The runner does not call OSV, an LLM or any live search
-service. If `BAAI/bge-small-en-v1.5` is not cached, FastEmbed must download it
-once before an evaluation can run; subsequent runs can use the local model
-cache.
+To write an additional measured result artifact, pass its path:
 
-To validate an already recorded artifact without initializing Qdrant or
-FastEmbed, use the pure-Python `validate_dataset`, `validate_evaluation_ids`,
-and `validate_baseline` functions from `evals/rag/evaluate.py`. Their tests use
-local repository files and saved chunks only.
+```sh
+python evals/rag/evaluate.py /tmp/rag-v3-results.json
+```
+
+The runner creates a temporary local Qdrant index. It does not call OSV, an LLM
+or any live search service. If `BAAI/bge-small-en-v1.5` is not cached,
+FastEmbed must download it once before evaluation; subsequent runs can use the
+local model cache.
 
 ## Dataset and ground truth
 
-`cases.json` (dataset v2) contains 30 package queries from OSV-Patchpilot and
-the pinned, MIT-licensed `test-agents` source snapshot. The fixture's repository
-revision is recorded in `fixtures/test-agents/PROVENANCE.md`. Cases cover
+`cases-v3.json` contains the review-focused package queries from OSV-Patchpilot
+and the pinned, MIT-licensed `test-agents` source snapshot. Its 28 cases cover
 production imports and API calls, aliases and submodules, transitive packages
-used by application code, tests and mocks, config-only references, semantic
-context, and dependencies with no source use.
+used by application code, tests and mocks, semantic context, and dependencies
+with no source use. It excludes the retired remediation graph and Git MCP
+configuration-only case. One removed Git-MCP-only test label was also dropped
+from the test-only case.
 
-Labels are manually checked against source. Retrieved results may identify
-candidates to audit, but similarity alone never makes a location relevant. A
-relevant source result must match a labelled file path and symbol and contain
-its required source snippet. The runner checks these facts against the current
-source and AST chunks before it builds an index. The case-level classification
-uses these meanings:
+The frozen v2 dataset, baseline, saved results and diagnostic documents remain
+unchanged as historical records. V2 is not the active benchmark: two of its
+labels point into code removed when the product was narrowed to Dependabot
+review. Do not use it to assess the current source tree.
 
-- `direct_import`: the source file explicitly imports the distribution's
-  module or a known relevant module.
+Labels are manually checked against source. A relevant source result must
+match a labelled file path and symbol and contain its required source snippet.
+The runner validates these facts against current source and AST chunks before
+indexing. Similarity alone never makes a location relevant.
+
+Case classifications mean:
+
+- `direct_import`: source explicitly imports the distribution's module or a
+  known relevant module.
 - `api_usage`: production code invokes or references a package API or symbol.
-- `test_only`: the package reference occurs in test code, not production code.
-- `configuration`: the package is referenced by a configuration file.
+- `test_only`: the reference occurs in test code, not production code.
 - `semantic_context`: the location is conceptually related but does not prove
   package use.
 - `no_evidence`: no relevant application source location is labelled.
 
-`mcp-server-git-config-only` is checked against `mcp_config.json` separately.
-The current index only reads Python and JavaScript/TypeScript code, so
-configuration files are outside source retrieval. The case has source
-classification `no_evidence`, configuration classification `configuration`,
-and is excluded from source-retrieval metrics. It does not claim application
-usage.
+The current dataset has no configuration-only cases because configuration
+files are outside source retrieval. Uncertain cases retain raw per-case
+results but do not contribute to aggregate retrieval metrics.
 
-The complete label-change explanations are in `AUDIT.md`. One semantic-context
-case is explicitly uncertain; its raw retrieval is retained, but it does not
-contribute to aggregate precision, recall or MRR.
+## Metrics
 
-The updated retriever adds import/module and production/test metadata while
-keeping chunk spans unchanged. Package-aware retrieval adds known import-module
-terms to BM25, preserves the original dense query, ranks the existing BM25 and
-dense candidates through RRF, and then qualifies results using syntax-derived
-package references. Weak semantic candidates are retained only when the
-repository has deterministic evidence of that package and are labelled as
-`semantic_context`. A repository with no package-specific evidence returns no
-source-use locations. See `diagnostic-v2.md` for the pre-change lane analysis.
+- **Precision@5:** arithmetic mean of per-case relevant returned source
+  locations divided by five; unfilled result slots count as non-relevant.
+- **Recall@5:** arithmetic mean across positive, non-uncertain source cases of
+  distinct labelled relevant locations retrieved in the top five divided by
+  the number of labelled locations.
+- **MRR:** arithmetic mean across positive, non-uncertain source cases of the
+  reciprocal rank of the first relevant result.
+- Negative cases have no recall or reciprocal-rank score. Uncertain cases are
+  excluded from aggregate precision, recall and MRR.
 
-## Metrics (evaluation v2)
-
-- **Precision@5:** relevant returned source locations divided by 5. When fewer
-  than five results are returned, missing slots count as non-relevant.
-- **Recall@5:** distinct labelled relevant source locations returned in the
-  top five divided by all labelled relevant source locations for the case.
-- **Reciprocal rank:** reciprocal of the first relevant result's rank; MRR is
-  averaged across positive, non-uncertain source cases only.
-- **`non_relevant_results_at_5`:** retrieved source results that are not
-  labelled relevant in positive cases.
-- **`no_evidence_false_positive_results`:** all retrieved source results for
-  eligible cases with no labelled source evidence. Configuration-only cases
-  are excluded because their config evidence is validated separately.
-- Aggregate precision, recall, and MRR are arithmetic means of per-case
-  scores (macro averages); recall and MRR average only positive,
-  non-uncertain source-evidence cases.
-- Negative cases do not receive recall or reciprocal-rank values. Uncertain
-  cases are excluded from all aggregate retrieval metrics. Configuration-only
-  cases are outside the source metric population.
-
-Every baseline case stores the query, expected locations, raw retrieved chunk
-content and location/rank metadata. Automated validation checks case-ID parity,
-recalculates per-case metrics from stored chunks, and verifies that aggregate
-metrics equal the per-case results. Evaluation/dataset versions are explicit;
-the v2 field names replace ambiguous v1 reporting and are not intended to be
-silently interpreted as the same schema.
+Each baseline case stores the query, expected locations, retrieved chunk text,
+and location/rank metadata. Validation checks case-ID parity, recomputes
+per-case metrics from stored chunks, and confirms aggregate metrics match.
+The current v3 baseline scores **40.74% Precision@5**, **94.42% Recall@5**,
+and **100% MRR** across 27 scored cases; one uncertain case is excluded from
+aggregate metrics. Precision is macro-averaged, so each scored query carries
+equal weight.
 
 ## Scope and limitations
 

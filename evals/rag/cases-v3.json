@@ -1,0 +1,856 @@
+{
+  "dataset_version": 3,
+  "description": "Source-audited package-to-source retrieval cases from OSV-Patchpilot and a pinned test-agents snapshot; see AUDIT.md for label changes.",
+  "repositories": {
+    "patchpilot": ".",
+    "test_agents_fixture": "evals/rag/fixtures/test-agents"
+  },
+  "cases": [
+    {
+      "id": "httpx-osv-query",
+      "repository": "patchpilot",
+      "dependency": "httpx",
+      "query": "httpx async HTTP client query_osv request raise_for_status JSON vulnerability records",
+      "dependency_relationship": "direct",
+      "expected_evidence_classification": "api_usage",
+      "expected_relevant_locations": [
+        {
+          "path": "osv_service.py",
+          "symbol": "query_osv",
+          "required_text": "http.post(OSV_QUERY_URL",
+          "evidence_classification": "api_usage"
+        }
+      ],
+      "explanation": "Only query_osv is in scope for this query: it makes the OSV API request through httpx. Retrieved FakeHTTP/AsyncMock and response tests are test-only infrastructure; the production GitHub status helper is genuine httpx usage but belongs to the separate release-lookup path, not the OSV query location.",
+      "source_retrieval_eligible": true,
+      "expected_source_evidence_classification": "api_usage",
+      "relevant_source_evidence_exists": true
+    },
+    {
+      "id": "httpx-github-release",
+      "repository": "patchpilot",
+      "dependency": "httpx",
+      "query": "httpx synchronous HTTP requests GitHub API release lookup status error",
+      "dependency_relationship": "direct",
+      "expected_evidence_classification": "api_usage",
+      "expected_relevant_locations": [
+        {
+          "path": "vulnerability_agent/dependabot_review.py",
+          "symbol": "_release_context",
+          "required_text": "httpx.Client(timeout=8.0",
+          "evidence_classification": "api_usage"
+        }
+      ],
+      "explanation": "The release lookup function creates an httpx client and performs GitHub API requests.",
+      "source_retrieval_eligible": true,
+      "expected_source_evidence_classification": "api_usage",
+      "relevant_source_evidence_exists": true
+    },
+    {
+      "id": "packaging-version-submodule",
+      "repository": "patchpilot",
+      "dependency": "packaging",
+      "query": "packaging.version Version parsing ordering package versions",
+      "dependency_relationship": "direct",
+      "expected_evidence_classification": "api_usage",
+      "expected_relevant_locations": [
+        {
+          "path": "osv_service.py",
+          "symbol": "_version_key",
+          "required_text": "return Version(value.lstrip(\"v\"))",
+          "evidence_classification": "api_usage"
+        },
+        {
+          "path": "osv_service.py",
+          "symbol": "poetry_constraint_allows",
+          "required_text": "resolved = Version(version)",
+          "evidence_classification": "api_usage"
+        }
+      ],
+      "explanation": "The project imports the packaging.version submodule and parses normalized versions in the active review constraint helpers.",
+      "source_retrieval_eligible": true,
+      "expected_source_evidence_classification": "api_usage",
+      "relevant_source_evidence_exists": true
+    },
+    {
+      "id": "packaging-specifiers",
+      "repository": "patchpilot",
+      "dependency": "packaging",
+      "query": "packaging.specifiers SpecifierSet Poetry dependency constraint check",
+      "dependency_relationship": "direct",
+      "expected_evidence_classification": "api_usage",
+      "expected_relevant_locations": [
+        {
+          "path": "osv_service.py",
+          "symbol": "poetry_constraint_allows",
+          "required_text": "resolved in SpecifierSet(pep440)",
+          "evidence_classification": "api_usage"
+        },
+        {
+          "path": "osv_service.py",
+          "symbol": "poetry_declared_constraint",
+          "required_text": "Requirement(str(raw_requirement))",
+          "evidence_classification": "api_usage"
+        }
+      ],
+      "explanation": "The function evaluates declared version constraints using packaging's SpecifierSet API.",
+      "source_retrieval_eligible": true,
+      "expected_source_evidence_classification": "api_usage",
+      "relevant_source_evidence_exists": true
+    },
+    {
+      "id": "pydantic-report-models",
+      "repository": "patchpilot",
+      "dependency": "pydantic",
+      "query": "pydantic BaseModel strict schema report fields validation",
+      "dependency_relationship": "direct",
+      "expected_evidence_classification": "direct_import",
+      "expected_relevant_locations": [
+        {
+          "path": "vulnerability_agent/report_validation.py",
+          "symbol": "_ReportModel",
+          "required_text": "class _ReportModel(BaseModel)",
+          "evidence_classification": "direct_import"
+        },
+        {
+          "path": "vulnerability_agent/report_validation.py",
+          "symbol": "DependencyRecord",
+          "required_text": "class DependencyRecord(_ReportModel)",
+          "evidence_classification": "api_usage"
+        },
+        {
+          "path": "vulnerability_agent/report_validation.py",
+          "symbol": "DependencyUpdate",
+          "required_text": "class DependencyUpdate(_ReportModel)",
+          "evidence_classification": "api_usage"
+        },
+        {
+          "path": "vulnerability_agent/report_validation.py",
+          "symbol": "TestResult",
+          "required_text": "class TestResult(_ReportModel)",
+          "evidence_classification": "api_usage"
+        },
+        {
+          "path": "vulnerability_agent/report_validation.py",
+          "symbol": "ReportCounts",
+          "required_text": "class ReportCounts(_ReportModel)",
+          "evidence_classification": "api_usage"
+        },
+        {
+          "path": "vulnerability_agent/report_validation.py",
+          "symbol": "AffectedVersionAssessment",
+          "required_text": "class AffectedVersionAssessment(_ReportModel)",
+          "evidence_classification": "api_usage"
+        },
+        {
+          "path": "vulnerability_agent/report_validation.py",
+          "symbol": "AdvisoryRecord",
+          "required_text": "class AdvisoryRecord(_ReportModel)",
+          "evidence_classification": "api_usage"
+        },
+        {
+          "path": "vulnerability_agent/report_validation.py",
+          "symbol": "FindingGroup",
+          "required_text": "class FindingGroup(_ReportModel)",
+          "evidence_classification": "api_usage"
+        },
+        {
+          "path": "vulnerability_agent/report_validation.py",
+          "symbol": "SecurityDelta",
+          "required_text": "class SecurityDelta(_ReportModel)",
+          "evidence_classification": "api_usage"
+        },
+        {
+          "path": "vulnerability_agent/report_validation.py",
+          "symbol": "ScanSummary",
+          "required_text": "class ScanSummary(_ReportModel)",
+          "evidence_classification": "api_usage"
+        },
+        {
+          "path": "vulnerability_agent/report_validation.py",
+          "symbol": "ReleaseContextRecord",
+          "required_text": "class ReleaseContextRecord(_ReportModel)",
+          "evidence_classification": "api_usage"
+        },
+        {
+          "path": "vulnerability_agent/report_validation.py",
+          "symbol": "DependencyAnalysis",
+          "required_text": "class DependencyAnalysis(_ReportModel)",
+          "evidence_classification": "api_usage"
+        },
+        {
+          "path": "vulnerability_agent/report_validation.py",
+          "symbol": "SourceLocation",
+          "required_text": "class SourceLocation(_ReportModel)",
+          "evidence_classification": "api_usage"
+        },
+        {
+          "path": "vulnerability_agent/report_validation.py",
+          "symbol": "VulnerabilityReachability",
+          "required_text": "class VulnerabilityReachability(_ReportModel)",
+          "evidence_classification": "api_usage"
+        },
+        {
+          "path": "vulnerability_agent/report_validation.py",
+          "symbol": "SourceUsageRecord",
+          "required_text": "class SourceUsageRecord(_ReportModel)",
+          "evidence_classification": "api_usage"
+        },
+        {
+          "path": "vulnerability_agent/report_validation.py",
+          "symbol": "SourceUsageSummary",
+          "required_text": "class SourceUsageSummary(_ReportModel)",
+          "evidence_classification": "api_usage"
+        },
+        {
+          "path": "vulnerability_agent/report_validation.py",
+          "symbol": "TestComparison",
+          "required_text": "class TestComparison(_ReportModel)",
+          "evidence_classification": "api_usage"
+        },
+        {
+          "path": "vulnerability_agent/report_validation.py",
+          "symbol": "ValidationRecord",
+          "required_text": "class ValidationRecord(_ReportModel)",
+          "evidence_classification": "api_usage"
+        },
+        {
+          "path": "vulnerability_agent/report_validation.py",
+          "symbol": "TestSummary",
+          "required_text": "class TestSummary(_ReportModel)",
+          "evidence_classification": "api_usage"
+        },
+        {
+          "path": "vulnerability_agent/report_validation.py",
+          "symbol": "ReportSummary",
+          "required_text": "class ReportSummary(_ReportModel)",
+          "evidence_classification": "api_usage"
+        },
+        {
+          "path": "vulnerability_agent/report_validation.py",
+          "symbol": "EvidenceReportV6",
+          "required_text": "class EvidenceReportV6(_ReportModel)",
+          "evidence_classification": "api_usage"
+        },
+        {
+          "path": "vulnerability_agent/report_validation.py",
+          "symbol": "validate_evidence_report",
+          "required_text": "EvidenceReportV6.model_validate(normalized)",
+          "evidence_classification": "api_usage"
+        },
+        {
+          "path": "vulnerability_agent/report_validation.py",
+          "symbol": "evidence_report_json_schema",
+          "required_text": "return EvidenceReportV6.model_json_schema()",
+          "evidence_classification": "api_usage"
+        }
+      ],
+      "explanation": "The module imports BaseModel directly in _ReportModel; all 20 listed report/evidence schemas inherit that Pydantic base. The public validation and JSON-schema functions also invoke Pydantic model APIs. The compatibility dictionary-normalization helper is intentionally not labelled as Pydantic use.",
+      "source_retrieval_eligible": true,
+      "expected_source_evidence_classification": "direct_import",
+      "relevant_source_evidence_exists": true
+    },
+    {
+      "id": "langgraph-review-graph",
+      "repository": "patchpilot",
+      "dependency": "langgraph",
+      "query": "LangGraph Dependabot review graph collect evidence analyze report end nodes",
+      "dependency_relationship": "direct",
+      "expected_evidence_classification": "api_usage",
+      "expected_relevant_locations": [
+        {
+          "path": "vulnerability_agent/review_graph.py",
+          "symbol": "build_dependabot_review_graph",
+          "required_text": "StateGraph(DependabotReviewState)",
+          "evidence_classification": "api_usage"
+        },
+        {
+          "path": "main.py",
+          "symbol": "main",
+          "required_text": "review_graph.invoke(initial_state)",
+          "evidence_classification": "api_usage"
+        }
+      ],
+      "explanation": "The Dependabot review pipeline independently uses LangGraph to orchestrate evidence collection and analysis.",
+      "source_retrieval_eligible": true,
+      "expected_source_evidence_classification": "api_usage",
+      "relevant_source_evidence_exists": true
+    },
+    {
+      "id": "langchain-openai-model",
+      "repository": "patchpilot",
+      "dependency": "langchain-openai",
+      "query": "langchain-openai ChatOpenAI configured model creation",
+      "dependency_relationship": "direct",
+      "expected_evidence_classification": "api_usage",
+      "expected_relevant_locations": [
+        {
+          "path": "vulnerability_agent/dependencies.py",
+          "symbol": "_model",
+          "required_text": "return ChatOpenAI(model=model_name())",
+          "evidence_classification": "api_usage"
+        }
+      ],
+      "explanation": "The lazy model factory constructs ChatOpenAI from the langchain-openai package.",
+      "source_retrieval_eligible": true,
+      "expected_source_evidence_classification": "api_usage",
+      "relevant_source_evidence_exists": true
+    },
+    {
+      "id": "mcp-client-session",
+      "repository": "patchpilot",
+      "dependency": "mcp",
+      "query": "Model Context Protocol ClientSession stdio client call tool",
+      "dependency_relationship": "direct",
+      "expected_evidence_classification": "api_usage",
+      "expected_relevant_locations": [
+        {
+          "path": "mcp_client.py",
+          "symbol": "MCPClient._call",
+          "required_text": "ClientSession(read, write)",
+          "evidence_classification": "api_usage"
+        },
+        {
+          "path": "mcp_client.py",
+          "symbol": "MCPClient.call",
+          "required_text": "return run_async(self._call(server, repo_path, tool, arguments))",
+          "evidence_classification": "api_usage"
+        }
+      ],
+      "explanation": "MCPClient opens a protocol ClientSession to call configured MCP tools.",
+      "source_retrieval_eligible": true,
+      "expected_source_evidence_classification": "api_usage",
+      "relevant_source_evidence_exists": true
+    },
+    {
+      "id": "qdrant-retriever",
+      "repository": "patchpilot",
+      "dependency": "qdrant-client",
+      "query": "QdrantClient local vector database collection create query points storage",
+      "dependency_relationship": "direct",
+      "expected_evidence_classification": "api_usage",
+      "expected_relevant_locations": [
+        {
+          "path": "vulnerability_agent/retrieval.py",
+          "symbol": "LocalCodeRetriever.__init__",
+          "required_text": "from qdrant_client import QdrantClient",
+          "evidence_classification": "api_usage"
+        },
+        {
+          "path": "vulnerability_agent/retrieval.py",
+          "symbol": "LocalCodeRetriever.index_sources",
+          "required_text": "PointStruct(id=document[\"id\"], vector=vector, payload=document)",
+          "evidence_classification": "api_usage"
+        },
+        {
+          "path": "vulnerability_agent/retrieval.py",
+          "symbol": "LocalCodeRetriever._repo_filter",
+          "required_text": "from qdrant_client.models import FieldCondition, Filter, MatchValue",
+          "evidence_classification": "api_usage"
+        },
+        {
+          "path": "vulnerability_agent/retrieval.py",
+          "symbol": "LocalCodeRetriever._load_documents",
+          "required_text": "self.client.scroll(",
+          "evidence_classification": "api_usage"
+        },
+        {
+          "path": "vulnerability_agent/retrieval.py",
+          "symbol": "LocalCodeRetriever.retrieve",
+          "required_text": "self.client.query_points(",
+          "evidence_classification": "api_usage"
+        },
+        {
+          "path": "tests/test_retrieval.py",
+          "symbol": "test_qdrant_local_index_searches_and_reloads_persisted_chunks",
+          "required_text": "retriever.index_sources",
+          "evidence_classification": "test_only"
+        }
+      ],
+      "explanation": "Five production locations directly demonstrate Qdrant client use: client/collection setup, PointStruct and upsert indexing, repository filters, persisted scroll loading, and vector query retrieval. The test that exercises LocalCodeRetriever is test infrastructure rather than another production Qdrant API call.",
+      "source_retrieval_eligible": true,
+      "expected_source_evidence_classification": "api_usage",
+      "relevant_source_evidence_exists": true
+    },
+    {
+      "id": "fastembed-model",
+      "repository": "patchpilot",
+      "dependency": "fastembed",
+      "query": "FastEmbed TextEmbedding local ONNX embedding model",
+      "dependency_relationship": "direct",
+      "expected_evidence_classification": "api_usage",
+      "expected_relevant_locations": [
+        {
+          "path": "vulnerability_agent/retrieval.py",
+          "symbol": "LocalCodeRetriever.__init__",
+          "required_text": "from fastembed import TextEmbedding",
+          "evidence_classification": "api_usage"
+        }
+      ],
+      "explanation": "The local code retriever creates the configured FastEmbed text embedding model.",
+      "source_retrieval_eligible": true,
+      "expected_source_evidence_classification": "api_usage",
+      "relevant_source_evidence_exists": true
+    },
+    {
+      "id": "tree-sitter-parser",
+      "repository": "patchpilot",
+      "dependency": "tree-sitter-language-pack",
+      "query": "tree-sitter-language-pack configure parser JavaScript TypeScript code chunks",
+      "dependency_relationship": "direct",
+      "expected_evidence_classification": "api_usage",
+      "expected_relevant_locations": [
+        {
+          "path": "vulnerability_agent/retrieval.py",
+          "symbol": "_tree_sitter_chunks",
+          "required_text": "get_parser(language)",
+          "evidence_classification": "api_usage"
+        }
+      ],
+      "explanation": "The chunker obtains a language parser from tree-sitter-language-pack to split JavaScript and TypeScript.",
+      "source_retrieval_eligible": true,
+      "expected_source_evidence_classification": "api_usage",
+      "relevant_source_evidence_exists": true
+    },
+    {
+      "id": "dotenv-load",
+      "repository": "patchpilot",
+      "dependency": "python-dotenv",
+      "query": "python-dotenv load_dotenv environment variables CLI",
+      "dependency_relationship": "direct",
+      "expected_evidence_classification": "api_usage",
+      "expected_relevant_locations": [
+        {
+          "path": "main.py",
+          "symbol": "main",
+          "required_text": "load_dotenv()",
+          "evidence_classification": "api_usage"
+        }
+      ],
+      "explanation": "The command-line entry point invokes python-dotenv to load local environment configuration.",
+      "source_retrieval_eligible": true,
+      "expected_source_evidence_classification": "api_usage",
+      "relevant_source_evidence_exists": true
+    },
+    {
+      "id": "tomli-aliased-import",
+      "repository": "patchpilot",
+      "dependency": "tomli",
+      "query": "tomli as tomllib compatibility TOML parser dependency declarations",
+      "dependency_relationship": "direct",
+      "expected_evidence_classification": "direct_import",
+      "expected_relevant_locations": [
+        {
+          "path": "osv_service.py",
+          "symbol": "poetry_declared_constraint",
+          "required_text": "import tomli as tomllib",
+          "evidence_classification": "direct_import"
+        },
+        {
+          "path": "vulnerability_agent/dependabot_review.py",
+          "symbol": "_direct_dependency_names",
+          "required_text": "import tomli as tomllib",
+          "evidence_classification": "direct_import"
+        },
+        {
+          "path": "vulnerability_agent/dependabot_review.py",
+          "symbol": "_dependency_index",
+          "required_text": "import tomli as tomllib",
+          "evidence_classification": "direct_import"
+        },
+        {
+          "path": "osv_service.py",
+          "symbol": "parse_python_lock",
+          "required_text": "import tomli as tomllib",
+          "evidence_classification": "direct_import"
+        }
+      ],
+      "explanation": "The source aliases tomli as tomllib on Python versions without the standard-library module; requirements.txt includes this compatibility dependency for Python below 3.11.",
+      "source_retrieval_eligible": true,
+      "expected_source_evidence_classification": "direct_import",
+      "relevant_source_evidence_exists": true
+    },
+    {
+      "id": "pytest-test-only",
+      "repository": "patchpilot",
+      "dependency": "pytest",
+      "query": "pytest raises MCP policy error forbidden tool test",
+      "dependency_relationship": "direct",
+      "expected_evidence_classification": "test_only",
+      "expected_relevant_locations": [
+        {
+          "path": "tests/test_mcp_policy.py",
+          "symbol": "test_proxy_rejects_non_allowlisted_tool",
+          "required_text": "pytest.raises(MCPPolicyError, match=",
+          "evidence_classification": "test_only"
+        },
+        {
+          "path": "tests/test_mcp_policy.py",
+          "symbol": "test_audit_log_persists_allowed_denied_and_error_calls",
+          "required_text": "database = tmp_path / \"audit.sqlite3\"",
+          "evidence_classification": "test_only"
+        },
+        {
+          "path": "tests/test_mcp_policy.py",
+          "symbol": "test_proxy_batches_safe_files_but_rejects_secret_paths",
+          "required_text": "tmp_path",
+          "evidence_classification": "test_only"
+        },
+        {
+          "path": "tests/test_mcp_policy.py",
+          "symbol": "test_proxy_rejects_escape_and_likely_secret_paths",
+          "required_text": "@pytest.mark.parametrize",
+          "evidence_classification": "test_only"
+        }
+      ],
+      "explanation": "Pytest is used by a test function only; this is not production application usage.",
+      "source_retrieval_eligible": true,
+      "expected_source_evidence_classification": "test_only",
+      "relevant_source_evidence_exists": true
+    },
+    {
+      "id": "pytest-async-test-only",
+      "repository": "patchpilot",
+      "dependency": "pytest-asyncio",
+      "query": "pytest asyncio marker async OSV query test",
+      "dependency_relationship": "direct",
+      "expected_evidence_classification": "test_only",
+      "expected_relevant_locations": [
+        {
+          "path": "tests/test_osv_service.py",
+          "symbol": "test_query_osv_parses_vulnerabilities",
+          "required_text": "@pytest.mark.asyncio",
+          "evidence_classification": "test_only"
+        },
+        {
+          "path": "tests/test_osv_service.py",
+          "symbol": "test_scan_packages_attaches_package_to_vulnerability",
+          "required_text": "@pytest.mark.asyncio",
+          "evidence_classification": "test_only"
+        }
+      ],
+      "explanation": "The pytest-asyncio marker is used only to run an asynchronous unit test.",
+      "source_retrieval_eligible": true,
+      "expected_source_evidence_classification": "test_only",
+      "relevant_source_evidence_exists": true
+    },
+    {
+      "id": "httpx-mocked-test",
+      "repository": "patchpilot",
+      "dependency": "httpx",
+      "query": "mock HTTPX response HTTPStatusError GitHub release lookup test",
+      "dependency_relationship": "direct",
+      "expected_evidence_classification": "test_only",
+      "expected_relevant_locations": [
+        {
+          "path": "tests/test_dependabot_review.py",
+          "symbol": "test_release_lookup_status_is_explicit_and_machine_readable",
+          "required_text": "httpx.Response(403",
+          "evidence_classification": "test_only"
+        }
+      ],
+      "explanation": "This test constructs an httpx response and mocked client to verify error handling; it is test-only evidence.",
+      "source_retrieval_eligible": true,
+      "expected_source_evidence_classification": "test_only",
+      "relevant_source_evidence_exists": true
+    },
+    {
+      "id": "langchain-core-transitive-message-use",
+      "repository": "test_agents_fixture",
+      "dependency": "langchain-core",
+      "query": "langchain_core messages SystemMessage ToolMessage Agent model prompt",
+      "dependency_relationship": "transitive",
+      "expected_evidence_classification": "direct_import",
+      "expected_relevant_locations": [
+        {
+          "path": "agents/agent.py",
+          "symbol": "Agent.call_tools_llm",
+          "required_text": "SystemMessage(content=TOOLS_SYSTEM_PROMPT)",
+          "evidence_classification": "direct_import"
+        },
+        {
+          "path": "agents/agent.py",
+          "symbol": "Agent.invoke_tools",
+          "required_text": "ToolMessage(",
+          "evidence_classification": "api_usage"
+        },
+        {
+          "path": "agents/agent.py",
+          "symbol": "AgentState",
+          "required_text": "AnyMessage",
+          "evidence_classification": "api_usage"
+        },
+        {
+          "path": "tests/test_agent.py",
+          "symbol": "test_model_node_adds_system_prompt_and_returns_model_message",
+          "required_text": "SystemMessage",
+          "evidence_classification": "test_only"
+        }
+      ],
+      "explanation": "The pinned poetry.lock resolves langchain-core through direct parent packages, while production Agent code imports and uses its message types.",
+      "source_retrieval_eligible": true,
+      "expected_source_evidence_classification": "direct_import",
+      "relevant_source_evidence_exists": true
+    },
+    {
+      "id": "langchain-core-transitive-tool-use",
+      "repository": "test_agents_fixture",
+      "dependency": "langchain-core",
+      "query": "langchain_core.tools tool decorator flight search function",
+      "dependency_relationship": "transitive",
+      "expected_evidence_classification": "api_usage",
+      "expected_relevant_locations": [
+        {
+          "path": "agents/tools/flights_finder.py",
+          "symbol": "flights_finder",
+          "required_text": "@tool(args_schema=FlightsInputSchema)",
+          "evidence_classification": "api_usage"
+        },
+        {
+          "path": "tests/test_agent.py",
+          "symbol": "test_tool_node_dispatches_known_tools_and_returns_tool_messages",
+          "required_text": "ToolMessage",
+          "evidence_classification": "test_only"
+        },
+        {
+          "path": "tests/test_agent.py",
+          "symbol": "test_flights_tool_maps_arguments_and_returns_search_results",
+          "required_text": "flights_module.flights_finder.invoke",
+          "evidence_classification": "test_only"
+        }
+      ],
+      "explanation": "The transitive package's tool decorator is imported and applied to a production function.",
+      "source_retrieval_eligible": true,
+      "expected_source_evidence_classification": "api_usage",
+      "relevant_source_evidence_exists": true
+    },
+    {
+      "id": "langchain-direct-distribution-import",
+      "repository": "test_agents_fixture",
+      "dependency": "langchain",
+      "query": "langchain pydantic_v1 BaseModel Field flight tool input schema",
+      "dependency_relationship": "direct",
+      "expected_evidence_classification": "direct_import",
+      "expected_relevant_locations": [
+        {
+          "path": "agents/tools/flights_finder.py",
+          "symbol": "FlightsInput",
+          "required_text": "class FlightsInput(BaseModel)",
+          "evidence_classification": "direct_import"
+        },
+        {
+          "path": "agents/tools/flights_finder.py",
+          "symbol": "FlightsInputSchema",
+          "required_text": "class FlightsInputSchema(BaseModel)",
+          "evidence_classification": "api_usage"
+        },
+        {
+          "path": "agents/tools/hotels_finder.py",
+          "symbol": "HotelsInputSchema",
+          "required_text": "class HotelsInputSchema(BaseModel)",
+          "evidence_classification": "api_usage"
+        },
+        {
+          "path": "agents/tools/hotels_finder.py",
+          "symbol": "HotelsInput",
+          "required_text": "class HotelsInput(BaseModel)",
+          "evidence_classification": "api_usage"
+        }
+      ],
+      "explanation": "The directly declared langchain distribution supplies the pydantic_v1 import used by the production input schema.",
+      "source_retrieval_eligible": true,
+      "expected_source_evidence_classification": "direct_import",
+      "relevant_source_evidence_exists": true
+    },
+    {
+      "id": "serpapi-production-api",
+      "repository": "test_agents_fixture",
+      "dependency": "serpapi",
+      "query": "SerpApi Google Flights search params API result data",
+      "dependency_relationship": "direct",
+      "expected_evidence_classification": "api_usage",
+      "expected_relevant_locations": [
+        {
+          "path": "agents/tools/flights_finder.py",
+          "symbol": "flights_finder",
+          "required_text": "serpapi.search(params)",
+          "evidence_classification": "api_usage"
+        },
+        {
+          "path": "agents/tools/hotels_finder.py",
+          "symbol": "hotels_finder",
+          "required_text": "search = serpapi.search(params)",
+          "evidence_classification": "api_usage"
+        },
+        {
+          "path": "tests/test_agent.py",
+          "symbol": "test_flights_tool_maps_arguments_and_returns_search_results",
+          "required_text": "flights_module.serpapi, \"search\"",
+          "evidence_classification": "test_only"
+        }
+      ],
+      "explanation": "The production flight-search function calls the SerpApi search API.",
+      "source_retrieval_eligible": true,
+      "expected_source_evidence_classification": "api_usage",
+      "relevant_source_evidence_exists": true
+    },
+    {
+      "id": "serpapi-mocked-test-only",
+      "repository": "test_agents_fixture",
+      "dependency": "serpapi",
+      "query": "monkeypatch mocked serpapi search flight test provider error",
+      "dependency_relationship": "direct",
+      "expected_evidence_classification": "test_only",
+      "expected_relevant_locations": [
+        {
+          "path": "tests/test_agent.py",
+          "symbol": "test_flights_tool_maps_arguments_and_returns_search_results",
+          "required_text": "monkeypatch.setattr(flights_module.serpapi, \"search\"",
+          "evidence_classification": "test_only"
+        },
+        {
+          "path": "tests/test_agent.py",
+          "symbol": "test_flights_tool_returns_provider_error_as_text",
+          "required_text": "flights_module.serpapi, \"search\"",
+          "evidence_classification": "test_only"
+        },
+        {
+          "path": "tests/test_agent.py",
+          "symbol": "test_hotels_tool_returns_at_most_five_properties",
+          "required_text": "hotels_module.serpapi, \"search\"",
+          "evidence_classification": "test_only"
+        },
+        {
+          "path": "tests/test_agent.py",
+          "symbol": "test_hotels_tool_propagates_provider_errors",
+          "required_text": "hotels_module.serpapi, \"search\"",
+          "evidence_classification": "test_only"
+        }
+      ],
+      "explanation": "This test replaces the SerpApi call with a mock; the reference is test-only, while production usage is separately labelled.",
+      "source_retrieval_eligible": true,
+      "expected_source_evidence_classification": "test_only",
+      "relevant_source_evidence_exists": true
+    },
+    {
+      "id": "sendgrid-production-api",
+      "repository": "test_agents_fixture",
+      "dependency": "sendgrid",
+      "query": "SendGrid API client Mail send email sender",
+      "dependency_relationship": "direct",
+      "expected_evidence_classification": "api_usage",
+      "expected_relevant_locations": [
+        {
+          "path": "agents/agent.py",
+          "symbol": "Agent.email_sender",
+          "required_text": "SendGridAPIClient(os.environ.get('SENDGRID_API_KEY'))",
+          "evidence_classification": "api_usage"
+        },
+        {
+          "path": "tests/test_agent.py",
+          "symbol": "test_email_sender_formats_and_sends_email",
+          "required_text": "agent_module, \"SendGridAPIClient\"",
+          "evidence_classification": "test_only"
+        }
+      ],
+      "explanation": "The production email sender constructs the SendGrid client and sends mail.",
+      "source_retrieval_eligible": true,
+      "expected_source_evidence_classification": "api_usage",
+      "relevant_source_evidence_exists": true
+    },
+    {
+      "id": "sendgrid-mocked-test-only",
+      "repository": "test_agents_fixture",
+      "dependency": "sendgrid",
+      "query": "FakeSendGrid mocked email API delivery test",
+      "dependency_relationship": "direct",
+      "expected_evidence_classification": "test_only",
+      "expected_relevant_locations": [
+        {
+          "path": "tests/test_agent.py",
+          "symbol": "test_email_sender_formats_and_sends_email",
+          "required_text": "class FakeSendGrid",
+          "evidence_classification": "test_only"
+        }
+      ],
+      "explanation": "The test replaces SendGrid with a fake object; this specific location is test-only evidence.",
+      "source_retrieval_eligible": true,
+      "expected_source_evidence_classification": "test_only",
+      "relevant_source_evidence_exists": true
+    },
+    {
+      "id": "aiohttp-transitive-no-source-use",
+      "repository": "test_agents_fixture",
+      "dependency": "aiohttp",
+      "query": "aiohttp asynchronous HTTP client server middleware application requests",
+      "dependency_relationship": "transitive",
+      "expected_evidence_classification": "no_evidence",
+      "expected_relevant_locations": [],
+      "explanation": "aiohttp is present as a transitive lockfile dependency of langchain, but no fixture application source imports or calls it.",
+      "source_retrieval_eligible": true,
+      "expected_source_evidence_classification": "no_evidence",
+      "relevant_source_evidence_exists": false
+    },
+    {
+      "id": "gitpython-transitive-no-source-use",
+      "repository": "test_agents_fixture",
+      "dependency": "GitPython",
+      "query": "GitPython git Repo clone commit repository client",
+      "dependency_relationship": "transitive",
+      "expected_evidence_classification": "no_evidence",
+      "expected_relevant_locations": [],
+      "explanation": "GitPython is listed transitively in the pinned lockfile, while the application fixture contains no git module import or GitPython API call.",
+      "source_retrieval_eligible": true,
+      "expected_source_evidence_classification": "no_evidence",
+      "relevant_source_evidence_exists": false
+    },
+    {
+      "id": "requests-transitive-no-source-use",
+      "repository": "test_agents_fixture",
+      "dependency": "requests",
+      "query": "requests HTTP GET Session requests API dependency",
+      "dependency_relationship": "transitive",
+      "expected_evidence_classification": "no_evidence",
+      "expected_relevant_locations": [],
+      "explanation": "Requests is pulled by a direct dependency in the lockfile, but application source does not import requests.",
+      "source_retrieval_eligible": true,
+      "expected_source_evidence_classification": "no_evidence",
+      "relevant_source_evidence_exists": false
+    },
+    {
+      "id": "werkzeug-no-source-use",
+      "repository": "patchpilot",
+      "dependency": "Werkzeug",
+      "query": "Werkzeug WSGI web server request middleware routing application",
+      "dependency_relationship": "unknown",
+      "expected_evidence_classification": "no_evidence",
+      "expected_relevant_locations": [],
+      "explanation": "There is no Werkzeug import, configuration entry, or application source reference in this repository.",
+      "source_retrieval_eligible": true,
+      "expected_source_evidence_classification": "no_evidence",
+      "relevant_source_evidence_exists": false
+    },
+    {
+      "id": "cryptography-weak-security-context",
+      "repository": "patchpilot",
+      "dependency": "cryptography",
+      "query": "cryptography encryption private key PEM secrets security handling",
+      "dependency_relationship": "unknown",
+      "expected_evidence_classification": "semantic_context",
+      "uncertain": true,
+      "expected_relevant_locations": [
+        {
+          "path": "reporting.py",
+          "symbol": "_is_sensitive_path",
+          "required_text": "_SECRET_FILE_SUFFIXES",
+          "evidence_classification": "semantic_context"
+        }
+      ],
+      "explanation": "This helper handles sensitive key-like filenames and may be semantically related to cryptography, but it does not import or call that package. Human judgement is needed to decide whether this context is useful.",
+      "source_retrieval_eligible": true,
+      "expected_source_evidence_classification": "semantic_context",
+      "relevant_source_evidence_exists": true
+    }
+  ],
+  "label_audit": "AUDIT.md"
+}

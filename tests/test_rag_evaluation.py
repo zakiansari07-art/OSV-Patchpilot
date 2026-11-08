@@ -6,6 +6,7 @@ import json
 import pytest
 
 from evals.rag.evaluate import (
+    BASELINE,
     DATASET,
     ROOT,
     _load_sources,
@@ -31,7 +32,7 @@ def source_context(dataset):
 
 
 def test_dataset_ids_match_recorded_baseline_and_have_no_duplicates(dataset):
-    baseline = json.loads((DATASET.parent / "baseline.json").read_text(encoding="utf-8"))
+    baseline = json.loads(BASELINE.read_text(encoding="utf-8"))
     validate_evaluation_ids(dataset["cases"], baseline["cases"])
     assert len({case["id"] for case in dataset["cases"]}) == len(dataset["cases"])
     assert 20 <= len(dataset["cases"]) <= 30
@@ -45,7 +46,7 @@ def test_every_ground_truth_path_symbol_snippet_and_configuration_ref_is_valid(d
     validate_dataset(dataset["cases"], sources, roots)
 
 
-def test_audited_cases_include_all_qdrant_pydantic_and_langgraph_locations(dataset):
+def test_active_benchmark_covers_qdrant_pydantic_and_review_graph(dataset):
     by_id = {case["id"]: case for case in dataset["cases"]}
     qdrant = by_id["qdrant-retriever"]["expected_relevant_locations"]
     qdrant_symbols = {item["symbol"] for item in qdrant}
@@ -59,9 +60,9 @@ def test_audited_cases_include_all_qdrant_pydantic_and_langgraph_locations(datas
     pydantic_symbols = {item["symbol"] for item in pydantic}
     assert {"_ReportModel", "ValidationRecord", "EvidenceReportV6",
             "validate_evidence_report", "evidence_report_json_schema"} <= pydantic_symbols
-    graph = by_id["langgraph-remediation-graph"]["expected_relevant_locations"]
+    graph = by_id["langgraph-review-graph"]["expected_relevant_locations"]
     assert len(graph) == 2
-    assert any("graph.add_conditional_edges(" in item["required_text"] for item in graph)
+    assert any("StateGraph(DependabotReviewState)" in item["required_text"] for item in graph)
 
 
 def test_relevant_location_matching_counts_distinct_expected_locations():
@@ -133,20 +134,11 @@ def test_negative_cases_have_false_positives_but_no_recall_or_mrr():
     assert summary["no_evidence_false_positive_results"] == 1
 
 
-def test_configuration_only_case_is_checked_outside_source_metrics(dataset, source_context):
-    roots, sources = source_context
-    validate_dataset(dataset["cases"], sources, roots)
-    case = next(item for item in dataset["cases"] if item["id"] == "mcp-server-git-config-only")
-    scored = score_case(case, [{"path": "mcp_client.py", "symbol": "MCPClient._config", "content": "config"}])
-
-    assert case["expected_evidence_classification"] == "configuration"
-    assert case["expected_source_evidence_classification"] == "no_evidence"
-    assert case["configuration_evidence_exists"] is True
-    assert case["source_retrieval_eligible"] is False
-    assert scored["precision_at_5"] is None
-    assert scored["no_evidence_false_positive_results"] is None
-    assert scored["configuration_evidence_validated"] is True
-    assert all(result["relevant"] is None for result in scored["retrieved"])
+def test_review_benchmark_excludes_remediation_and_git_mcp_cases(dataset):
+    case_ids = {case["id"] for case in dataset["cases"]}
+    assert "langgraph-remediation-graph" not in case_ids
+    assert "mcp-server-git-config-only" not in case_ids
+    assert all(case["expected_evidence_classification"] != "configuration" for case in dataset["cases"])
 
 
 def test_uncertain_case_is_excluded_from_aggregate_metrics():
@@ -179,7 +171,7 @@ def test_missing_or_duplicate_evaluation_results_fail_clearly(dataset):
 
 
 def test_saved_baseline_scores_recompute_from_raw_chunks_and_aggregate(dataset):
-    baseline = json.loads((DATASET.parent / "baseline.json").read_text(encoding="utf-8"))
+    baseline = json.loads(BASELINE.read_text(encoding="utf-8"))
     validate_baseline(dataset, baseline)
     changed = copy.deepcopy(baseline)
     changed["cases"][0]["precision_at_5"] = 1.0
@@ -188,7 +180,7 @@ def test_saved_baseline_scores_recompute_from_raw_chunks_and_aggregate(dataset):
 
 
 def test_missing_case_from_baseline_fails_with_actionable_error(dataset):
-    baseline = json.loads((DATASET.parent / "baseline.json").read_text(encoding="utf-8"))
+    baseline = json.loads(BASELINE.read_text(encoding="utf-8"))
     baseline["cases"].pop()
     with pytest.raises(ValueError, match="missing="):
         validate_baseline(dataset, baseline)
@@ -196,10 +188,11 @@ def test_missing_case_from_baseline_fails_with_actionable_error(dataset):
 
 def test_category_summary_keeps_configuration_outside_source_categories():
     dataset = json.loads(DATASET.read_text(encoding="utf-8"))
-    report = json.loads((DATASET.parent / "baseline.json").read_text(encoding="utf-8"))
+    report = json.loads(BASELINE.read_text(encoding="utf-8"))
     validate_baseline(dataset, report)
     summary = report["summary"]
-    assert summary["configuration_only_case_count"] == 1
+    assert summary["configuration_only_case_count"] == 0
     assert "configuration" not in summary["category_metrics"]
-    assert summary["with_relevant_source_evidence"] == 24
-    assert summary["without_relevant_source_evidence"] == 4
+    positive_cases = sum(bool(case["expected_relevant_locations"]) for case in dataset["cases"]
+                         if case.get("source_retrieval_eligible", True) and not case.get("uncertain"))
+    assert summary["with_relevant_source_evidence"] == positive_cases

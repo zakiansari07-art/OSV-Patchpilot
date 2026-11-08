@@ -1,5 +1,9 @@
 # Code cleanup audit
 
+> Historical note: this audit recorded the prior cleanup before the OSV
+> remediation workflow was retired. The current product is Dependabot review
+> only; the remediation-candidate inventory below is point-in-time history.
+
 ## Scope and baseline
 
 Audit performed on branch `code-cleanup` with a clean working tree before

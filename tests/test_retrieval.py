@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import hashlib
-import json
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -20,7 +19,7 @@ from vulnerability_agent.retrieval import (
 )
 from vulnerability_agent.package_imports import distribution_import_modules, package_search_terms
 from vulnerability_agent.dependencies import AgentDependencies
-from vulnerability_agent.nodes import patching, usage_analysis
+from vulnerability_agent.nodes import usage_analysis
 
 
 def test_python_code_is_chunked_by_function_with_line_metadata():
@@ -324,93 +323,3 @@ def fetch_data(url):
     persisted_results = reopened.retrieve(repository, "requests fetch_data", limit=3)
     reopened.client.close()
     assert persisted_results[0]["path"] == "src/client.py"
-
-
-def test_patch_planner_does_not_retrieve_or_prompt_with_source_context(tmp_path):
-    (tmp_path / "requirements.txt").write_text("demo==1.0\n", encoding="utf-8")
-    (tmp_path / "app.py").write_text("def use_demo():\n    return True\n", encoding="utf-8")
-    captured = {}
-
-    class FakeTools:
-        audit_log = type("Audit", (), {"database_path": tmp_path / "audit.sqlite3"})()
-
-        def call(self, _server, _root, tool, args):
-            if tool == "read_text_file":
-                return Path(args["path"]).read_text(encoding="utf-8")
-            raise AssertionError(f"Unexpected MCP tool: {tool}")
-
-    class FakeRetriever:
-        def has_index(self, *_args, **_kwargs):
-            raise AssertionError("Patch planning must not access the source retriever")
-
-    class FakeModel:
-        def invoke(self, prompt):
-            captured["prompt"] = prompt
-            return SimpleNamespace(content=json.dumps({
-                "plan": "Update demo", "edits": [{
-                    "file": "requirements.txt", "old": "demo==1.0\n", "new": "demo==2.0\n",
-                }],
-            }))
-
-    deps = AgentDependencies(tools=FakeTools(), model=FakeModel(), code_retriever=FakeRetriever())
-    state = {
-        "repo_path": str(tmp_path), "main_repo_path": str(tmp_path),
-        "manifest_path": "requirements.txt",
-        "current_vuln": {"id": "OSV-DEMO", "summary": "demo advisory", "package": {"name": "demo"}},
-        "failure_log": "AssertionError: expected remediation behavior",
-        "patch_code": {}, "original_files": {}, "attempt_count": 1,
-        "manifest_path": "requirements.txt",
-    }
-
-    result = patching.node_investigate_and_plan(state, deps)
-
-    assert "AssertionError" in captured["prompt"]
-    assert "app.py" not in captured["prompt"]
-    assert "return True" not in captured["prompt"]
-    assert "dependency declaration files only" in captured["prompt"]
-    assert "source_context" not in result
-    assert "retrieval_status" not in result
-
-
-def test_patch_planner_rejects_application_source_edits(tmp_path):
-    (tmp_path / "requirements.txt").write_text("demo==1.0\n", encoding="utf-8")
-
-    class FakeTools:
-        audit_log = type("Audit", (), {"database_path": tmp_path / "audit.sqlite3"})()
-
-        def call(self, _server, _root, tool, args):
-            assert tool == "read_text_file"
-            return Path(args["path"]).read_text(encoding="utf-8")
-
-    class SourceEditModel:
-        def invoke(self, _prompt):
-            return SimpleNamespace(content=json.dumps({
-                "plan": "Change application code", "edits": [{
-                    "file": "app.py", "old": "unsafe()", "new": "safe()",
-                }],
-            }))
-
-    deps = AgentDependencies(tools=FakeTools(), model=SourceEditModel())
-    state = {
-        "repo_path": str(tmp_path), "manifest_path": "requirements.txt",
-        "current_vuln": {"id": "OSV-DEMO", "package": {"name": "demo"}},
-        "patch_code": {}, "original_files": {}, "attempt_count": 1,
-    }
-
-    with pytest.raises(ValueError, match="not an allowed dependency declaration"):
-        patching.node_investigate_and_plan(state, deps)
-
-
-def test_apply_patch_rejects_source_files_before_creating_a_branch(tmp_path):
-    class FakeDependencies:
-        def git_call(self, *_args, **_kwargs):
-            raise AssertionError("A rejected source patch must not create a branch")
-
-    result = patching.node_apply_patch({
-        "repo_path": str(tmp_path), "manifest_path": "requirements.txt",
-        "current_vuln": {"package": {"name": "demo"}},
-        "patch_code": {"app.py": "unsafe()\n"},
-    }, FakeDependencies())
-
-    assert result["error_code"] == "non_dependency_edit_rejected"
-    assert "app.py" in result["error"]

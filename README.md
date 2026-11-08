@@ -1,112 +1,93 @@
 # OSV Patchpilot
 
-**A human-approved dependency security agent that turns OSV findings and Dependabot updates into reviewable, test-backed evidence.**
+**A Dependabot pull request review agent that turns dependency changes into test-backed, traceable security evidence.**
 
-OSV Patchpilot is a Python portfolio project exploring a practical question: how can an AI workflow help with dependency security while keeping security decisions, code changes, and GitHub permissions under human control?
-
-It has two workflows:
-
-1. **Remediate a vulnerable dependency:** inspect resolved versions, query OSV, propose a dependency-only update, regenerate supported lockfiles, run tests, verify the advisory again, and pause for approval before creating a branch and pull request.
-2. **Review a Dependabot pull request:** compare base and PR snapshots, test outcomes, OSV findings, and package usage clues; produce a validated JSON report and optionally post a concise comment.
-
-This is an educational portfolio project, not a production security service. It does not merge pull requests or claim that a dependency is exploitable or safe based on AI output.
+OSV Patchpilot collects evidence about an open Dependabot PR, compares dependency and OSV results between the base and updated revisions, and produces a validated report. It can optionally use an LLM to explain the evidence and post one concise comment. The review flow is read-only with respect to the PR: it does not push, edit, approve, or merge it.
 
 ## Project at a glance
 
 | | |
 |---|---|
 | **Language** | Python |
-| **Workflow orchestration** | LangGraph with resumable SQLite checkpoints |
-| **Security data** | Google OSV API; deterministic package/version and advisory matching |
-| **Code retrieval** | Qdrant, FastEmbed, BM25, dense retrieval, Reciprocal Rank Fusion, AST/Tree-sitter chunks |
-| **Integrations** | GitHub API, MCP filesystem/Git tools, OpenAI, optional LangSmith tracing |
-| **Automation** | Two GitHub Actions examples with separate evidence and comment jobs |
-| **Current verification** | 209 tests passing; evaluation v2 covers 30 labeled cases |
+| **Workflow orchestration** | LangGraph |
+| **Security data** | Google OSV API and deterministic advisory/version comparison |
+| **Source evidence** | Qdrant, FastEmbed, BM25, dense retrieval, RRF, AST/Tree-sitter chunks |
+| **Integrations** | GitHub API, read-only MCP filesystem access, OpenAI, optional LangSmith tracing |
+| **Automation** | Separate GitHub Actions evidence and trusted comment workflows |
+| **Current verification** | Full test suite and versioned retrieval evaluation; see below |
 
 ## What this project demonstrates
 
-- **Agent workflow design:** explicit graph nodes, conditional transitions, bounded retries, per-finding worktrees, resumable approval checkpoints, and failure reporting.
-- **Security-minded AI integration:** the model proposes small dependency-file edits; deterministic validation restricts edited paths and exact replacements. OSV range checks, tests, and a post-change scan provide independent checks.
-- **Evidence-first reporting:** package-advisory provenance, test comparisons, source locations, and report validation stay visible in versioned JSON.
-- **Hybrid code retrieval:** syntax-aware chunks combine keyword and vector search. Package/import metadata qualifies results, while test-only and semantic-context evidence stay labeled.
-- **CI trust boundaries:** an evidence job can execute dependency installation and tests without AI or write secrets. A separate trusted job consumes a validated artifact and can post a comment without checking out or executing the Dependabot branch.
-- **Engineering discipline:** tests cover graph routing, parsing, security guardrails, report contracts, retrieval, and regressions.
+- **Secure CI design:** separate a job that executes dependency setup and tests from a trusted job that analyzes the artifact and may write a PR comment.
+- **Evidence-oriented AI:** gather exact commits, test outcomes, dependency changes, OSV findings, and labeled source clues before asking a model to summarize.
+- **Deterministic security logic:** classify advisory changes and validate report consistency in code; use the LLM for explanation, not authoritative vulnerability decisions.
+- **Hybrid code search:** combine lexical and vector retrieval, then qualify package evidence using import and source metadata. Preserve file, line, symbol, and evidence type for review.
+- **Defensive reporting:** validate downloaded JSON, verify PR number/repository/author/head SHA before commenting, redact likely credentials, and retain provenance.
+- **Testable integration boundaries:** OSV, GitHub, MCP, and model calls are isolated behind functions or injected clients and covered by offline tests.
 
 ## Demo gallery
 
-The repository does not currently include captured UI screenshots or a LangSmith trace recording. Add real captures here when available; keep credentials, private repository contents, and API keys out of images and recordings.
+The repository does not include captured UI screenshots or a LangSmith trace yet. Replace these placeholders with real, sanitized captures before sharing the project. Remove secrets and private repository data from images and recordings.
 
-| Demo asset | What to capture | Suggested file |
+| Demo asset | Suggested capture | Suggested file |
 |---|---|---|
-| LangSmith trace GIF | A short trace showing graph nodes, transitions, and a completed run with secrets and repository details hidden. | `docs/assets/langsmith-trace.gif` |
-| Dependabot review report | The generated summary showing base/PR test results, OSV delta, and labeled source locations. | `docs/assets/dependabot-review-report.png` |
-| Human approval checkpoint | The CLI paused before publishing a branch or pull request. | `docs/assets/approval-checkpoint.png` |
-| GitHub Actions handoff | The evidence artifact flowing into the trusted comment workflow. | `docs/assets/actions-handoff.png` |
+| LangSmith trace GIF | Review graph nodes from collection through analysis, with sensitive values hidden. | `docs/assets/langsmith-review-trace.gif` |
+| Review report | Summary of base/PR tests, OSV delta, and labeled source locations. | `docs/assets/dependabot-review-report.png` |
+| GitHub comment | Final concise comment with evidence-artifact link and collapsed AI assessment. | `docs/assets/dependabot-review-comment.png` |
+| Actions handoff | Evidence artifact produced by the first workflow and consumed by the trusted comment workflow. | `docs/assets/actions-evidence-handoff.png` |
 
-<!-- Replace each placeholder below with the corresponding image after adding a reviewed capture. -->
+<!-- Replace the comments below with image links after adding reviewed captures. -->
 
-<!-- ![LangSmith workflow trace](docs/assets/langsmith-trace.gif) -->
+<!-- ![LangSmith Dependabot review trace](docs/assets/langsmith-review-trace.gif) -->
 
-<!-- ![Dependabot review report](docs/assets/dependabot-review-report.png) -->
+<!-- ![Dependabot review evidence report](docs/assets/dependabot-review-report.png) -->
 
-<!-- ![Human approval checkpoint](docs/assets/approval-checkpoint.png) -->
+<!-- ![Dependabot review comment](docs/assets/dependabot-review-comment.png) -->
 
-<!-- ![GitHub Actions evidence handoff](docs/assets/actions-handoff.png) -->
+<!-- ![GitHub Actions evidence handoff](docs/assets/actions-evidence-handoff.png) -->
 
-## How it works
+## Review workflow
 
 ```mermaid
 flowchart TD
-  subgraph Remediation[OSV remediation]
-    A[Resolve manifests and lockfiles] --> B[Query OSV and group findings]
-    B --> C[Create isolated worktree]
-    C --> D[Run baseline tests]
-    D --> E[Model proposes dependency-file edits]
-    E --> F[Validate edits and regenerate lockfile]
-    F --> G[Run tests and rescan OSV]
-    G --> H{Verified and approved?}
-    H -- No --> I[Record failure or await approval]
-    H -- Yes --> J[Create branch and pull request]
-  end
-
-  subgraph Review[Dependabot review]
-    K[Read PR metadata and exact commits] --> L[Test base and PR snapshots]
-    L --> M[Compare OSV and dependency changes]
-    M --> N[Retrieve labeled package usage clues]
-    N --> O[Validate evidence JSON]
-    O --> P[Optional AI assessment and PR comment]
-  end
+  A[Read PR metadata and exact base/head commits] --> B[Create isolated snapshots]
+  B --> C[Prepare test environments and run base/PR tests]
+  C --> D[Compare dependencies and OSV findings]
+  D --> E[Retrieve package usage clues with hybrid RAG]
+  E --> F[Validate and save evidence JSON]
+  F --> G{Collection only?}
+  G -- Yes --> H[Upload evidence artifact]
+  G -- No --> I[Optional AI analysis]
+  I --> J{Explicit comment opt-in?}
+  J -- Yes --> K[Verify PR identity and post/update comment]
+  J -- No --> L[Save report for human review]
 ```
 
-### Key design choices
+### Trust boundaries
 
-- **Deterministic security checks:** the model explains evidence and proposes edits. Package identity, version ranges, advisory status, allowed edit paths, and report consistency are checked in code.
-- **Small, constrained patches:** the remediation model returns exact search/replace edits. Application source and tests are outside the allowed patch paths; generated Python lockfiles are regenerated by the package manager.
-- **Human approval before publishing:** a verified change pauses at a resumable checkpoint. Approval can authorize a branch and PR; it never merges the PR.
-- **RAG is navigation evidence:** retrieval finds likely usage locations. It does not establish vulnerable-call reachability and is not included in the patch prompt.
-- **Separate CI trust zones:** the evidence workflow has no OpenAI or write-capable token. The comment workflow checks out trusted agent code and validates the downloaded evidence against PR identity.
+The evidence workflow can install dependencies and run tests from the PR snapshot. It receives no OpenAI key or write-capable GitHub token. The separate `workflow_run` comment workflow checks out trusted agent code, downloads JSON evidence only, validates the report against the event’s PR identity, and posts a comment only when explicitly configured. It does not check out or execute the Dependabot branch.
+
+The local CLI also separates collection from commenting: `--collect-only` gathers evidence without calling an LLM; `--analyze-report --post-comment` consumes a saved report and requires expected PR identity values.
 
 ## Retrieval evaluation
 
-The versioned v2 benchmark contains **30 labeled cases** covering API use, direct imports, test-only references, configuration-only evidence, semantic context, and no-evidence cases. On the saved package-aware update, compared with the frozen v2 baseline:
+The active v3 benchmark is focused on the review product and contains 28 labeled cases from this repository and a pinned fixture repository. It excludes the retired remediation graph and Git MCP configuration. The frozen v2 dataset, baseline, and results remain as historical artifacts; v2 is no longer the active benchmark because it labels source locations that have since been removed.
 
-| Metric | Baseline | Updated |
-|---|---:|---:|
-| Precision@5 | 39.29% | **41.43%** |
-| Recall@5 | 87.88% | **92.57%** |
-| MRR | 93.06% | **100.00%** |
-| No-evidence false-positive results | 20 | **0** |
+| Metric | Active review-focused v3 |
+|---|---:|
+| Precision@5 | 40.74% |
+| Recall@5 | 94.42% |
+| MRR | 100% |
 
-Precision, recall, and MRR are macro-averaged according to the evaluator’s v2 definitions. These are results on a small, manually labeled benchmark, not a claim of general retrieval accuracy. See [`evals/rag/README.md`](evals/rag/README.md) for the metric definitions and reproduction instructions; the frozen labels and baseline remain unchanged.
+Metrics are macro-averaged under the evaluator definitions and are engineering signals on a small, manually labeled set—not general accuracy claims. See [`evals/rag/README.md`](evals/rag/README.md) for methodology and reproduction.
 
 ## Run locally
 
 ### Requirements
 
 - Python 3.10 or newer and Git.
-- Node.js/`npx` and `uv`/`uvx` for the configured MCP servers.
-- Poetry or `uv` when a target project needs a Python lockfile regenerated.
-- An OpenAI API key for model planning or AI review. Evidence collection can run without it.
+- Node.js with `npx` for the MCP filesystem server.
+- An OpenAI API key for AI analysis or comment generation. Collection-only mode does not need it.
 - A GitHub token only for the GitHub operations being used.
 
 ### Install
@@ -118,7 +99,7 @@ python -m pip install --upgrade pip
 python -m pip install -r requirements.txt
 ```
 
-For model-backed runs, create a local `.env` file in the project root:
+For model-backed runs, create a local `.env` file:
 
 ```dotenv
 OPENAI_API_KEY=your-openai-api-key
@@ -126,28 +107,18 @@ OPENAI_MODEL=gpt-4o-mini
 GITHUB_TOKEN=your-github-token
 ```
 
-`OPENAI_MODEL` and `GITHUB_TOKEN` are only needed for paths that use them. LangSmith is optional; enable tracing with `LANGSMITH_TRACING=true`, `LANGSMITH_API_KEY`, and optionally `LANGSMITH_PROJECT`. Traces can contain repository-derived text and prompts, so use a workspace approved for that data.
+LangSmith is optional. Enable tracing with `LANGSMITH_TRACING=true`, `LANGSMITH_API_KEY`, and optionally `LANGSMITH_PROJECT`. Traces can include repository-derived text and prompts, so use a workspace approved for that data.
 
-### Try the CLI
+### Collect a local review
 
-```bash
-python main.py --help
-```
-
-Run an OSV remediation against a clean, disposable repository clone:
-
-```bash
-python main.py "/path/to/clean-repository" --report "/tmp/patchpilot-run.json"
-```
-
-Review a Dependabot pull request locally without posting a comment:
+Use a clean clone of the repository under review:
 
 ```bash
 python main.py "/path/to/clean-clone" --review-pr 123 --collect-only \
   --report "/tmp/dependabot-evidence.json"
 ```
 
-The collected report can be analyzed separately. Posting requires an explicit opt-in and expected PR identity values:
+Analyze a collected report and optionally post a comment:
 
 ```bash
 python main.py --analyze-report "/tmp/dependabot-evidence.json" \
@@ -157,6 +128,8 @@ python main.py --analyze-report "/tmp/dependabot-evidence.json" \
   --expected-head-sha FULL_PR_HEAD_SHA
 ```
 
+See all options with `python main.py --help`. Reports are automatically archived under `saved report/`; use `--report PATH` for an additional copy.
+
 ## Tests and evaluation
 
 Run the full suite:
@@ -165,36 +138,34 @@ Run the full suite:
 python -m pytest -q
 ```
 
-Re-run RAG evaluation to a separate output file; this preserves the frozen baseline and saved historical results:
+Run the active retrieval evaluation to a separate file:
 
 ```bash
-python evals/rag/evaluate.py /tmp/patchpilot-rag-results.json
+python evals/rag/evaluate.py /tmp/patchpilot-rag-v3.json
 ```
 
-The test suite mocks OSV, GitHub, MCP, and model calls. It does not create a real pull request or require API keys. The RAG evaluation uses the local embedding model and a temporary Qdrant index; its first run may require downloading the model.
+The tests mock OSV, GitHub, MCP, and model calls. The RAG evaluator uses a temporary local Qdrant index and FastEmbed; the model may need to be downloaded on its first run.
 
-## GitHub Actions example
+## GitHub Actions templates
 
-The templates in [`examples/github-actions/`](examples/github-actions/) show an evidence job followed by a trusted comment job. To adapt them, copy both files into a target repository's `.github/workflows/`, set `VULNERABILITY_AGENT_REPOSITORY` and `VULNERABILITY_AGENT_COMMIT` to a reviewed immutable agent commit, and configure the required secrets. Review and pin all third-party Actions to verified commit SHAs before production use. More setup detail is in [`docs/DEPENDABOT_REVIEW.md`](docs/DEPENDABOT_REVIEW.md).
+The templates in [`examples/github-actions/`](examples/github-actions/) illustrate the evidence/comment split. Configure `VULNERABILITY_AGENT_REPOSITORY` and `VULNERABILITY_AGENT_COMMIT` to a reviewed immutable agent commit, then add the required secrets. Before using the examples in another repository, pin all third-party Actions to verified commit SHAs and review token permissions. More setup detail is in [`docs/DEPENDABOT_REVIEW.md`](docs/DEPENDABOT_REVIEW.md).
+
+For a code-oriented introduction to the current review flow and architecture, see the [Beginner Study Guide](docs/BEGINNER_STUDY_GUIDE.md).
 
 ## Repository map
 
 | Area | Files | Responsibility |
 |---|---|---|
-| CLI and orchestration | `main.py`, `vulnerability_agent/graph.py`, `vulnerability_agent/review_graph.py` | CLI, remediation graph, review graph, approval/resume paths |
-| Security analysis | `osv_service.py`, `vulnerability_agent/dependabot_review.py`, `vulnerability_agent/report_validation.py` | Dependency resolution, OSV comparison, evidence/report validation |
-| Retrieval | `vulnerability_agent/retrieval.py`, `vulnerability_agent/package_imports.py`, `vulnerability_agent/nodes/usage_analysis.py` | Hybrid search, package mappings, source evidence |
-| Integrations and safety | `mcp_client.py`, `sandbox_runner.py`, `persistence.py`, `examples/github-actions/` | Tool policy, test subprocesses, checkpoints, CI handoff |
+| CLI and review graph | `main.py`, `vulnerability_agent/review_graph.py` | Collection, analysis, report saving, optional comment |
+| Dependency evidence | `vulnerability_agent/dependabot_review.py`, `osv_service.py` | Snapshot comparison, test execution, dependency resolution, OSV delta |
+| Source evidence | `vulnerability_agent/nodes/usage_analysis.py`, `vulnerability_agent/retrieval.py`, `vulnerability_agent/package_imports.py` | Package mapping and hybrid code retrieval |
+| Trust and reporting | `mcp_client.py`, `reporting.py`, `vulnerability_agent/report_validation.py` | Read-only tool policy, redaction, report validation |
 | Verification | `tests/`, `evals/rag/` | Regression/security tests and versioned retrieval benchmark |
 
-## Current limitations
+## Limitations
 
-- The project updates dependency declarations and supported lockfiles; it does not repair vulnerable application code.
-- A clean OSV result is bounded by supported manifest formats, resolved versions, and OSV data. It is not proof that a repository is vulnerability-free.
-- Test execution is best-effort and is not an OS-level sandbox. Use disposable repositories and ephemeral CI runners for untrusted dependency code.
-- RAG can miss or mis-rank locations. A source reference does not prove that vulnerable code is reachable at runtime.
-- The Actions files are examples. Pin every action and review token permissions and repository settings before adopting them.
-
-## About this portfolio project
-
-This project is designed to make engineering decisions inspectable: graph state and transitions are explicit, proposed changes are constrained, reports retain evidence provenance, tests cover security boundaries, and evaluation inputs are versioned. The demo assets above are placeholders until real, sanitized captures are added.
+- The agent reviews dependency changes; it does not modify or merge the Dependabot PR.
+- OSV coverage depends on supported manifests, resolved package versions, and the data returned by OSV. An incomplete scan is not evidence that a repository is vulnerability-free.
+- Test execution is best-effort and not an OS-level sandbox. Use ephemeral runners for untrusted dependency code.
+- RAG may miss or mis-rank locations. A source reference does not prove that vulnerable behavior is reachable at runtime.
+- The GitHub Actions files are examples and should be pinned and reviewed before production use.

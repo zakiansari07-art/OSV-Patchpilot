@@ -67,19 +67,6 @@ def test_parse_pull_request_reference_rejects_invalid_values(value):
         review.parse_pull_request_reference(value)
 
 
-def test_finding_delta_does_not_mark_advisory_resolved_when_only_version_changes():
-    delta = review._finding_delta(
-        {"findings": [{"id": "GHSA-1", "package": "demo", "version": "1.0", "ecosystem": "PyPI"}]},
-        {"findings": [{"id": "GHSA-1", "package": "demo", "version": "2.0", "ecosystem": "PyPI"}]},
-    )
-    assert delta["resolved"] == []
-    assert delta["introduced"] == []
-    assert delta["remaining"] == [{
-        "id": "GHSA-1", "package": "demo", "version": "2.0", "ecosystem": "PyPI",
-        "base_version": "1.0", "head_version": "2.0",
-    }]
-
-
 def test_dependency_comparison_labels_direct_and_transitive_updates(tmp_path):
     base, head = tmp_path / "base", tmp_path / "head"
     base.mkdir()

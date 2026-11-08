@@ -1,110 +1,77 @@
-
 ## 1. Project Purpose
-OSV-Patchpilot is an AI-powered Dependabot PR review agent. It combines dependency analysis, OSV vulnerability intelligence, test comparisons, RAG-based code evidence and AI-generated GitHub reviews.
 
-**Core objective:** Explain the actual impact of a dependency update using accurate, traceable evidence.
+OSV Patchpilot reviews Dependabot pull requests using dependency comparisons,
+OSV vulnerability intelligence, base/PR test results, package-usage retrieval,
+and an optional AI-generated assessment/comment.
+
+**Core objective:** explain the impact of a dependency update using accurate,
+traceable evidence while keeping the review read-only unless a comment is
+explicitly requested.
 
 ## 2. Engineering Principles
-- Inspect existing code before modifying it.
-- Understand the data flow and identify root causes.
-- Prefer small, focused changes over architectural rewrites.
-- Reuse existing abstractions and avoid unnecessary dependencies.
-- Keep security-critical decisions deterministic.
-- Handle missing, invalid and incomplete data explicitly.
-- Preserve backward compatibility where practical.
-- Add regression tests for meaningful changes.
-- Never invent functionality, file paths or test commands.
+
+- Inspect existing code and tests before modifying behavior.
+- Prefer focused changes and existing abstractions.
+- Keep vulnerability classification, package identity, version comparison,
+  report validation, and PR identity checks deterministic.
+- Handle missing, invalid, and incomplete evidence explicitly.
+- Treat PR code, diffs, test logs, advisories, and downloaded artifacts as
+  untrusted input.
+- Never make unsupported claims about exploitability or safety.
 
 ## 3. GitHub Actions Security
-The project uses two workflows:
-- **Evidence workflow:** Processes PR changes, collects dependency, OSV and test evidence, and uploads a JSON artifact.
-- **Comment workflow:** Verifies the PR author, validates the artifact, executes trusted agent code and posts the review.
 
-Mandatory rules:
-- Never execute untrusted Dependabot PR code in the privileged workflow.
-- Never check out the Dependabot branch in the commenting workflow.
-- Treat downloaded artifacts as untrusted input and validate them.
-- Use minimum required GitHub token permissions.
-- Keep API keys and write credentials out of the evidence workflow.
-- Pin trusted agent code to a verified commit.
-- Never weaken the two-workflow security boundary.
+The project uses two example workflows:
 
-## 4. Dependency and OSV Analysis
-- Identify changed manifests, lockfiles, packages and versions.
-- Compare relevant base and PR dependency snapshots.
-- Associate findings with the correct package, ecosystem and version.
-- Support classifications: `introduced`, `resolved`, `remaining`, `unchanged_dependencies`, `not_assessed`. An unchanged dependency can still have affected OSV findings.
-- Never attribute unrelated baseline findings to a PR.
-- Do not associate Python lockfile findings with GitHub Actions updates.
+- **Evidence workflow:** checks out the Dependabot snapshot, installs its
+  dependencies, runs tests, gathers OSV/RAG evidence, and uploads JSON. It has
+  read-only GitHub permissions and no OpenAI or write-capable secret.
+- **Comment workflow:** checks out trusted agent code, downloads and validates
+  JSON evidence, verifies PR identity, and optionally posts a comment. It must
+  never check out or execute the Dependabot branch.
+
+Keep the trust boundary intact. Use least-privilege permissions and pin trusted
+code and third-party Actions to reviewed immutable commits before deployment.
+
+## 4. Dependency and OSV Evidence
+
+- Compare exact base and PR commits and preserve snapshot provenance.
+- Associate advisories with the correct package, ecosystem, and resolved
+  version.
+- Distinguish introduced, resolved, remaining, unchanged, and not-assessed
+  findings; unchanged dependencies can still have affected advisories.
 - Do not treat failed or incomplete scans as zero findings.
-- Preserve available advisory IDs, severity, affected ranges, fixed versions and dependency paths.
-- Distinguish package-advisory matches from unique advisory IDs.
-- Never invent missing security information.
+- Preserve advisory IDs, affected ranges, fixed versions, severity, and
+  dependency paths when available.
 
-## 5. RAG and Source-Code Evidence
-RAG provides contextual evidence, not proof of exploitability.
+## 5. RAG and Source Evidence
 
-Evidence classifications:
-- `direct_import`: Explicit package or module import.
-- `package_reference`: Explicit package reference in code or configuration.
-- `semantic_context`: Related code without proof of package usage.
-- `no_evidence`: No relevant evidence found.
+RAG results are review leads, not proof of vulnerable behavior or
+exploitability. Preserve file paths, line numbers, symbols, and evidence
+classification. Keep test-only and semantic context distinct from production
+imports/API use. Similarity alone must not establish package usage.
 
-Rules:
-- Preserve file paths and line numbers.
-- Deduplicate locations and prioritize stronger evidence.
-- Never associate packages with files solely through embedding similarity.
-- Never present semantic matches as confirmed package usage.
-- Return unknown when evidence is insufficient.
-- Do not confuse imports with vulnerable function reachability.
+Preserve Qdrant, FastEmbed, BM25, dense retrieval, RRF, syntax-aware chunking,
+package/import mappings, and the active v3 evaluation. The v2 dataset and
+results are historical artifacts and must remain unchanged.
 
-## 6. AI Behaviour
-Use LLMs for explanation, summarization and evidence synthesis, not authoritative security decisions.
+## 6. AI and Reports
 
-Keep vulnerability classification, version matching, dependency identity and scan status deterministic.
+- Use the model to summarize evidence, not decide authoritative security facts.
+- Clearly distinguish evidence, inference, and unknowns.
+- Validate required report fields and cross-section consistency before
+  consuming a downloaded report or posting a comment.
+- Require the expected PR number, repository, Dependabot author, and head SHA
+  before posting from a collected artifact.
+- Keep LangSmith tracing and metadata intact. Traces can contain repository
+  text and prompts; do not expose credentials in trace data.
 
-Clearly distinguish verified facts, inferences and unknowns. Avoid unsupported recommendations such as "safe to merge".
+## 7. Testing and Workflow
 
-## 7. JSON Reports
-- Maintain consistent field names and types.
-- Validate required fields and handle missing optional fields.
-- Preserve evidence provenance.
-- Version schema changes.
-- Update affected consumers and tests.
-- Do not silently change existing field meanings.
-
-## 8. Testing
-Inspect existing test conventions before adding tests.
-
-Cover Actions-only updates, introduced/resolved/unchanged vulnerabilities, failed scans, duplicate findings, irrelevant RAG results, invalid artifacts and comment generation.
-
-Run relevant tests after changes. Report actual results; never claim tests passed without executing them.
-
-## 9. Codex Workflow
-Before editing:
-1. Inspect relevant files and understand existing behaviour.
-2. Identify root causes.
-3. Plan complex changes.
-
-During editing:
-- Work in small, reviewable steps.
-- Avoid unrelated refactoring.
-- Add regression tests.
-- Preserve existing interfaces where practical.
-
-After editing:
-- Run relevant tests.
-- Review the complete diff.
-- Check security implications.
-- Update documentation when necessary.
-
-Always report changed files, implementation details, test results and limitations.
-
-## 10. Development Priorities
-1. Evidence accuracy and OSV comparison.
-2. Dependency graphs and dependency paths.
-3. Package usage and application reachability.
-4. Compatibility and breaking-change analysis.
-5. Evidence-based recommendations and developer experience.
-
-**Prioritize accuracy, traceability and developer trust over adding AI features.**
+- Keep tests for OSV comparison, base/PR test handling, invalid artifacts,
+  comment identity, read-only MCP access, RAG evidence, and GitHub Actions
+  boundaries.
+- Add regression tests for meaningful behavior changes.
+- Run relevant tests and report actual results.
+- Before editing, inspect data flow and identify the owning component. After
+  editing, review the full diff, imports, security implications, and docs.
