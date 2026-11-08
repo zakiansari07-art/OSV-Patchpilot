@@ -13,12 +13,6 @@ from agent_graph import (
     build_run_report,
     select_test_command,
 )
-from vulnerability_agent.nodes.patching import (
-    find_package_usage_files,
-    package_search_terms,
-    rank_source_candidates,
-    source_excerpt_for_package,
-)
 from vulnerability_agent.dependencies import AgentDependencies
 
 
@@ -470,37 +464,6 @@ def test_search_replace_edit_allows_new_file_creation_only_when_marked():
     import pytest
     with pytest.raises(ValueError, match="empty 'old'"):
         apply_search_replace_edits([edit], {"requirements.txt": ""})
-
-
-def test_package_search_builds_literal_import_variants(monkeypatch, tmp_path):
-    import vulnerability_agent.nodes.patching as patching
-
-    call = {}
-    def fake_run(command, **kwargs):
-        call["command"] = command
-        return Mock(returncode=0, stdout="src/client.py\ntests/test_client.py\n", stderr="")
-
-    monkeypatch.setattr(patching.subprocess, "run", fake_run)
-    assert package_search_terms("demo-package") == ["demo-package", "demo_package"]
-    assert find_package_usage_files(tmp_path, "demo-package") == ["src/client.py", "tests/test_client.py"]
-    assert "-F" in call["command"]
-    assert call["command"].count("-e") == 2
-
-
-def test_targeted_source_files_and_matching_lines_are_prioritized():
-    ordered = rank_source_candidates(
-        ["z_fallback.py", "src/client.py", "tests/test_client.py"],
-        {"src/client.py", "tests/test_client.py"},
-    )
-    assert ordered[:2] == ["src/client.py", "tests/test_client.py"]
-    excerpt = source_excerpt_for_package(
-        "far header\nheader one\nheader two\nimport demo_package\ncall_demo()\ntrailer",
-        ["demo-package", "demo_package"],
-        max_chars=120,
-    )
-    assert "import demo_package" in excerpt
-    assert "call_demo()" in excerpt
-    assert "far header" not in excerpt
 
 
 def test_branch_names_sanitize_package_and_vulnerability_characters():

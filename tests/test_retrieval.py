@@ -60,44 +60,6 @@ def test_code_chunker_rejects_sensitive_and_non_code_paths():
     assert chunk_source("src/package-lock.json", '{"name": "demo"}') == []
 
 
-def test_source_candidates_accept_filesystem_server_root_object(tmp_path, monkeypatch):
-    tree = json.dumps({
-        "name": "demo-repo",
-        "type": "directory",
-        "children": [
-            {"name": "app.py", "type": "file"},
-            {"name": "tests", "type": "directory", "children": [
-                {"name": "test_app.py", "type": "file"},
-            ]},
-            {"name": ".env", "type": "file"},
-        ],
-    })
-    monkeypatch.setattr(
-        patching, "find_package_usage_files", lambda *_args: set(),
-    )
-
-    candidates = patching._tree_source_candidates(tree, tmp_path, "jinja2")
-
-    assert candidates == ["app.py", "tests/test_app.py"]
-
-
-def test_source_candidates_fall_back_to_git_tracked_files_when_mcp_tree_is_unrecognized(tmp_path, monkeypatch):
-    monkeypatch.setattr(patching, "find_package_usage_files", lambda *_args: set())
-    monkeypatch.setattr(
-        patching.subprocess,
-        "run",
-        lambda *_args, **_kwargs: SimpleNamespace(
-            returncode=0,
-            stdout="app.py\0tests/test_app.py\0.env.py\0package-lock.json\0",
-            stderr="",
-        ),
-    )
-
-    candidates = patching._tree_source_candidates('{"tree": []}', tmp_path, "aiohttp")
-
-    assert candidates == ["app.py", "tests/test_app.py"]
-
-
 def test_zero_chunk_rag_index_uses_literal_fallback_for_report_only_locations(tmp_path, monkeypatch):
     app_source = "from demo import render_report\n\ndef show(value):\n    return render_report(value)\n"
     captured = {}
