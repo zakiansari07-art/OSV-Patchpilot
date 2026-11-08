@@ -630,6 +630,68 @@ def test_source_usage_field_is_neutral_and_legacy_report_is_normalized():
     assert "test evidence: test_only" in render_pr_comment(report, "")
 
 
+def test_source_usage_classifications_come_from_serialized_locations_only():
+    compact, = review._compact_source_usage([{
+        "package": "cryptography", "ecosystem": "pypi",
+        "source_usage_classifications": ["direct_import", "api_usage"],
+        "locations": [{"path": "src/security.py", "line_start": 4, "line_end": 4,
+                       "area": "application", "evidence_classification": "semantic_context",
+                       "excerpt": "Build a secure transport configuration."}],
+    }])
+    assert compact["source_usage_classifications"] == ["semantic_context"]
+    assert compact["evidence_classification"] == "semantic_context"
+    comment = render_pr_comment({
+        "dependency_changes": [], "summary": {"dependency_updates": [], "tests": {}, "osv": {}},
+        "source_usage": [compact],
+    }, "")
+    assert "production source evidence: not established" in comment
+    assert "other source evidence: semantic_context" in comment
+
+    report = review._compact_review_report({
+        "mode": "dependabot_pr_review", "status": "review_complete",
+        "repository_full_name": "acme/demo", "pull_request": {"number": 12},
+        "files_changed": [],
+        "dependency_changes": [{"package": "cryptography", "ecosystem": "pypi",
+                                "base_version": "43.0", "head_version": "44.0",
+                                "relationship": "unknown", "dependency_paths": []}],
+        "source_usage_status": "completed_with_matches", "source_usage": [compact],
+        "base": {"tests": {"passed": True}, "security_scan": {"scan_status": "complete", "findings": [], "unresolved_packages": []}},
+        "head": {"tests": {"passed": True}, "security_scan": {"scan_status": "complete", "findings": [], "unresolved_packages": []}},
+        "security_delta": {"resolved": [], "introduced": [], "remaining": [], "unaffected": [], "not_assessed": []},
+    })
+    assert validate_evidence_report(report) is report
+    inconsistent = json.loads(json.dumps(report))
+    inconsistent["source_usage"][0]["source_usage_classifications"].append("direct_import")
+    inconsistent["source_usage"][0]["evidence_classification"] = "direct_import"
+    with pytest.raises(EvidenceReportValidationError, match="derived from recorded locations"):
+        validate_evidence_report(inconsistent)
+
+    no_location, = review._compact_source_usage([{
+        "package": "cryptography", "ecosystem": "pypi",
+        "source_usage_classifications": ["direct_import"], "locations": [],
+    }])
+    assert no_location["source_usage_classifications"] == ["no_evidence"]
+    assert no_location["evidence_classification"] == "no_evidence"
+
+
+def test_werkzeug_changed_dependency_is_consistent_in_summary_and_detail():
+    report = review._compact_review_report({
+        "mode": "dependabot_pr_review", "status": "review_complete", "repository_full_name": "acme/demo",
+        "pull_request": {"number": 7}, "files_changed": [],
+        "dependency_changes": [{"package": "werkzeug", "ecosystem": "pypi", "base_version": "3.0.0",
+                                "head_version": "3.0.1", "relationship": "transitive",
+                                "dependency_paths": [["flask", "werkzeug"]]}],
+        "source_usage_status": "completed_without_matches", "source_usage": [],
+        "base": {"tests": {"passed": True}, "security_scan": {"scan_status": "complete", "findings": [], "unresolved_packages": []}},
+        "head": {"tests": {"passed": True}, "security_scan": {"scan_status": "complete", "findings": [], "unresolved_packages": []}},
+        "security_delta": {"resolved": [], "introduced": [], "remaining": [], "unaffected": [], "not_assessed": []},
+    })
+    assert report["dependency_changes"][0]["package"] == "werkzeug"
+    assert report["summary"]["dependency_updates"][0]["package"] == "werkzeug"
+    assert report["summary"]["dependency_analyses"][0]["package"] == "werkzeug"
+    assert validate_evidence_report(report) is report
+
+
 def test_ai_narrative_cannot_attribute_global_remaining_count_to_one_package():
     report = {
         "security_delta": {

@@ -1,0 +1,1798 @@
+{
+  "cases": [
+    {
+      "dependency": "httpx",
+      "expected_evidence_classification": "api_usage",
+      "expected_relevant_count": 1,
+      "false_positive_results": 0,
+      "id": "httpx-osv-query",
+      "precision_at_5": 0.2,
+      "recall_at_5": 1.0,
+      "reciprocal_rank": 1.0,
+      "relevant_evidence_exists": true,
+      "relevant_ranks": [
+        1
+      ],
+      "retrieved": [
+        {
+          "line_end": 547,
+          "line_start": 529,
+          "path": "osv_service.py",
+          "rank": 1,
+          "relevant": true,
+          "symbol": "query_osv"
+        },
+        {
+          "line_end": 287,
+          "line_start": 276,
+          "path": "tests/test_osv_service.py",
+          "rank": 2,
+          "relevant": false,
+          "symbol": "test_query_osv_parses_vulnerabilities"
+        },
+        {
+          "line_end": 124,
+          "line_start": 112,
+          "path": "tests/test_agent_graph.py",
+          "rank": 3,
+          "relevant": false,
+          "symbol": "FakeHTTP.post"
+        },
+        {
+          "line_end": 61,
+          "line_start": 31,
+          "path": "tests/test_dependabot_review.py",
+          "rank": 4,
+          "relevant": false,
+          "symbol": "test_release_lookup_status_is_explicit_and_machine_readable"
+        },
+        {
+          "line_end": 526,
+          "line_start": 513,
+          "path": "vulnerability_agent/review_graph.py",
+          "rank": 5,
+          "relevant": false,
+          "symbol": "_raise_for_github_status"
+        }
+      ],
+      "returned_count": 5,
+      "uncertain": false
+    },
+    {
+      "dependency": "httpx",
+      "expected_evidence_classification": "api_usage",
+      "expected_relevant_count": 1,
+      "false_positive_results": 0,
+      "id": "httpx-github-release",
+      "precision_at_5": 0.2,
+      "recall_at_5": 1.0,
+      "reciprocal_rank": 1.0,
+      "relevant_evidence_exists": true,
+      "relevant_ranks": [
+        1
+      ],
+      "retrieved": [
+        {
+          "line_end": 1454,
+          "line_start": 1381,
+          "path": "vulnerability_agent/dependabot_review.py",
+          "rank": 1,
+          "relevant": true,
+          "symbol": "_release_context"
+        },
+        {
+          "line_end": 526,
+          "line_start": 513,
+          "path": "vulnerability_agent/review_graph.py",
+          "rank": 2,
+          "relevant": false,
+          "symbol": "_raise_for_github_status"
+        },
+        {
+          "line_end": 61,
+          "line_start": 31,
+          "path": "tests/test_dependabot_review.py",
+          "rank": 3,
+          "relevant": false,
+          "symbol": "test_release_lookup_status_is_explicit_and_machine_readable"
+        },
+        {
+          "line_end": 757,
+          "line_start": 752,
+          "path": "tests/test_workstream_f_regressions.py",
+          "rank": 4,
+          "relevant": false,
+          "symbol": "test_ai_review_cannot_invent_upstream_release_explanation_after_lookup_failure"
+        },
+        {
+          "line_end": 1660,
+          "line_start": 1571,
+          "path": "vulnerability_agent/dependabot_review.py",
+          "rank": 5,
+          "relevant": false,
+          "symbol": "review_dependabot_pull_request"
+        }
+      ],
+      "returned_count": 5,
+      "uncertain": false
+    },
+    {
+      "dependency": "packaging",
+      "expected_evidence_classification": "api_usage",
+      "expected_relevant_count": 1,
+      "false_positive_results": 0,
+      "id": "packaging-version-submodule",
+      "precision_at_5": 0.0,
+      "recall_at_5": 0.0,
+      "reciprocal_rank": 0.0,
+      "relevant_evidence_exists": true,
+      "relevant_ranks": [],
+      "retrieved": [
+        {
+          "line_end": 87,
+          "line_start": 71,
+          "path": "osv_service.py",
+          "rank": 1,
+          "relevant": false,
+          "symbol": "upgrade_guidance_for_finding"
+        },
+        {
+          "line_end": 202,
+          "line_start": 119,
+          "path": "vulnerability_agent/dependabot_review.py",
+          "rank": 2,
+          "relevant": false,
+          "symbol": "_scan"
+        },
+        {
+          "line_end": 62,
+          "line_start": 18,
+          "path": "osv_service.py",
+          "rank": 3,
+          "relevant": false,
+          "symbol": "fixed_versions_for_finding"
+        },
+        {
+          "line_end": 478,
+          "line_start": 465,
+          "path": "osv_service.py",
+          "rank": 4,
+          "relevant": false,
+          "symbol": "parse_package_json"
+        },
+        {
+          "line_end": 242,
+          "line_start": 221,
+          "path": "osv_service.py",
+          "rank": 5,
+          "relevant": false,
+          "symbol": "assess_version_affected_by_advisory"
+        }
+      ],
+      "returned_count": 5,
+      "uncertain": false
+    },
+    {
+      "dependency": "packaging",
+      "expected_evidence_classification": "api_usage",
+      "expected_relevant_count": 1,
+      "false_positive_results": 0,
+      "id": "packaging-specifiers",
+      "precision_at_5": 0.2,
+      "recall_at_5": 1.0,
+      "reciprocal_rank": 0.5,
+      "relevant_evidence_exists": true,
+      "relevant_ranks": [
+        2
+      ],
+      "retrieved": [
+        {
+          "line_end": 402,
+          "line_start": 369,
+          "path": "osv_service.py",
+          "rank": 1,
+          "relevant": false,
+          "symbol": "poetry_declared_constraint"
+        },
+        {
+          "line_end": 366,
+          "line_start": 330,
+          "path": "osv_service.py",
+          "rank": 2,
+          "relevant": true,
+          "symbol": "poetry_constraint_allows"
+        },
+        {
+          "line_end": 258,
+          "line_start": 245,
+          "path": "tests/test_osv_service.py",
+          "rank": 3,
+          "relevant": false,
+          "symbol": "test_poetry_constraint_and_lockfile_verification"
+        },
+        {
+          "line_end": 439,
+          "line_start": 405,
+          "path": "osv_service.py",
+          "rank": 4,
+          "relevant": false,
+          "symbol": "verify_group_resolution"
+        },
+        {
+          "line_end": 1202,
+          "line_start": 1113,
+          "path": "vulnerability_agent/dependabot_review.py",
+          "rank": 5,
+          "relevant": false,
+          "symbol": "_compact_review_report"
+        }
+      ],
+      "returned_count": 5,
+      "uncertain": false
+    },
+    {
+      "dependency": "pydantic",
+      "expected_evidence_classification": "direct_import",
+      "expected_relevant_count": 1,
+      "false_positive_results": 0,
+      "id": "pydantic-report-models",
+      "precision_at_5": 0.2,
+      "recall_at_5": 1.0,
+      "reciprocal_rank": 1.0,
+      "relevant_evidence_exists": true,
+      "relevant_ranks": [
+        1
+      ],
+      "retrieved": [
+        {
+          "line_end": 11,
+          "line_start": 10,
+          "path": "vulnerability_agent/report_validation.py",
+          "rank": 1,
+          "relevant": true,
+          "symbol": "_ReportModel"
+        },
+        {
+          "line_end": 253,
+          "line_start": 249,
+          "path": "vulnerability_agent/report_validation.py",
+          "rank": 2,
+          "relevant": false,
+          "symbol": "ValidationRecord"
+        },
+        {
+          "line_end": 291,
+          "line_start": 273,
+          "path": "vulnerability_agent/report_validation.py",
+          "rank": 3,
+          "relevant": false,
+          "symbol": "EvidenceReportV6"
+        },
+        {
+          "line_end": 502,
+          "line_start": 458,
+          "path": "vulnerability_agent/report_validation.py",
+          "rank": 4,
+          "relevant": false,
+          "symbol": "_normalize_legacy_v4"
+        },
+        {
+          "line_end": 532,
+          "line_start": 530,
+          "path": "vulnerability_agent/report_validation.py",
+          "rank": 5,
+          "relevant": false,
+          "symbol": "evidence_report_json_schema"
+        }
+      ],
+      "returned_count": 5,
+      "uncertain": false
+    },
+    {
+      "dependency": "langgraph",
+      "expected_evidence_classification": "api_usage",
+      "expected_relevant_count": 1,
+      "false_positive_results": 0,
+      "id": "langgraph-remediation-graph",
+      "precision_at_5": 0.2,
+      "recall_at_5": 1.0,
+      "reciprocal_rank": 0.5,
+      "relevant_evidence_exists": true,
+      "relevant_ranks": [
+        2
+      ],
+      "retrieved": [
+        {
+          "line_end": 188,
+          "line_start": 155,
+          "path": "vulnerability_agent/graph.py",
+          "rank": 1,
+          "relevant": false,
+          "symbol": "build_graph"
+        },
+        {
+          "line_end": 154,
+          "line_start": 65,
+          "path": "vulnerability_agent/graph.py",
+          "rank": 2,
+          "relevant": true,
+          "symbol": "build_graph"
+        },
+        {
+          "line_end": 1,
+          "line_start": 1,
+          "path": "vulnerability_agent/nodes/__init__.py",
+          "rank": 3,
+          "relevant": false,
+          "symbol": "lines_1_1"
+        },
+        {
+          "line_end": 1,
+          "line_start": 1,
+          "path": "vulnerability_agent/__init__.py",
+          "rank": 4,
+          "relevant": false,
+          "symbol": "lines_1_1"
+        },
+        {
+          "line_end": 21,
+          "line_start": 1,
+          "path": "agent_graph.py",
+          "rank": 5,
+          "relevant": false,
+          "symbol": "lines_1_21"
+        }
+      ],
+      "returned_count": 5,
+      "uncertain": false
+    },
+    {
+      "dependency": "langgraph",
+      "expected_evidence_classification": "api_usage",
+      "expected_relevant_count": 1,
+      "false_positive_results": 0,
+      "id": "langgraph-review-graph",
+      "precision_at_5": 0.2,
+      "recall_at_5": 1.0,
+      "reciprocal_rank": 1.0,
+      "relevant_evidence_exists": true,
+      "relevant_ranks": [
+        1
+      ],
+      "retrieved": [
+        {
+          "line_end": 652,
+          "line_start": 569,
+          "path": "vulnerability_agent/review_graph.py",
+          "rank": 1,
+          "relevant": true,
+          "symbol": "build_dependabot_review_graph"
+        },
+        {
+          "line_end": 784,
+          "line_start": 695,
+          "path": "main.py",
+          "rank": 2,
+          "relevant": false,
+          "symbol": "main"
+        },
+        {
+          "line_end": 1022,
+          "line_start": 993,
+          "path": "tests/test_dependabot_review.py",
+          "rank": 3,
+          "relevant": false,
+          "symbol": "test_cli_accepts_artifact_url_for_matching_repository_report"
+        },
+        {
+          "line_end": 24,
+          "line_start": 17,
+          "path": "vulnerability_agent/review_graph.py",
+          "rank": 4,
+          "relevant": false,
+          "symbol": "DependabotReviewState"
+        },
+        {
+          "line_end": 256,
+          "line_start": 240,
+          "path": "tests/test_dependabot_review.py",
+          "rank": 5,
+          "relevant": false,
+          "symbol": "test_review_graph_preserves_evidence_when_model_fails"
+        }
+      ],
+      "returned_count": 5,
+      "uncertain": false
+    },
+    {
+      "dependency": "langchain-openai",
+      "expected_evidence_classification": "api_usage",
+      "expected_relevant_count": 1,
+      "false_positive_results": 0,
+      "id": "langchain-openai-model",
+      "precision_at_5": 0.2,
+      "recall_at_5": 1.0,
+      "reciprocal_rank": 1.0,
+      "relevant_evidence_exists": true,
+      "relevant_ranks": [
+        1
+      ],
+      "retrieved": [
+        {
+          "line_end": 18,
+          "line_start": 14,
+          "path": "vulnerability_agent/dependencies.py",
+          "rank": 1,
+          "relevant": true,
+          "symbol": "_model"
+        },
+        {
+          "line_end": 237,
+          "line_start": 217,
+          "path": "tests/test_dependabot_review.py",
+          "rank": 2,
+          "relevant": false,
+          "symbol": "test_review_graph_stores_ai_text_after_osv_contradiction_filtering"
+        },
+        {
+          "line_end": 11,
+          "line_start": 9,
+          "path": "settings.py",
+          "rank": 3,
+          "relevant": false,
+          "symbol": "model_name"
+        },
+        {
+          "line_end": 498,
+          "line_start": 478,
+          "path": "tests/test_workstream_f_regressions.py",
+          "rank": 4,
+          "relevant": false,
+          "symbol": "test_ai_review_does_not_conflate_osv_affected_version_with_application_reachability"
+        },
+        {
+          "line_end": 709,
+          "line_start": 695,
+          "path": "tests/test_workstream_f_regressions.py",
+          "rank": 5,
+          "relevant": false,
+          "symbol": "test_ai_narrative_cannot_attribute_global_remaining_count_to_one_package"
+        }
+      ],
+      "returned_count": 5,
+      "uncertain": false
+    },
+    {
+      "dependency": "mcp",
+      "expected_evidence_classification": "api_usage",
+      "expected_relevant_count": 1,
+      "false_positive_results": 0,
+      "id": "mcp-client-session",
+      "precision_at_5": 0.2,
+      "recall_at_5": 1.0,
+      "reciprocal_rank": 1.0,
+      "relevant_evidence_exists": true,
+      "relevant_ranks": [
+        1
+      ],
+      "retrieved": [
+        {
+          "line_end": 255,
+          "line_start": 223,
+          "path": "mcp_client.py",
+          "rank": 1,
+          "relevant": true,
+          "symbol": "MCPClient._call"
+        },
+        {
+          "line_end": 203,
+          "line_start": 190,
+          "path": "mcp_client.py",
+          "rank": 2,
+          "relevant": false,
+          "symbol": "MCPPolicyProxy.call"
+        },
+        {
+          "line_end": 271,
+          "line_start": 261,
+          "path": "mcp_client.py",
+          "rank": 3,
+          "relevant": false,
+          "symbol": "MCPClient.call"
+        },
+        {
+          "line_end": 24,
+          "line_start": 22,
+          "path": "mcp_client.py",
+          "rank": 4,
+          "relevant": false,
+          "symbol": "MCPCallError"
+        },
+        {
+          "line_end": 14,
+          "line_start": 12,
+          "path": "tests/test_mcp_policy.py",
+          "rank": 5,
+          "relevant": false,
+          "symbol": "RecordingClient.call"
+        }
+      ],
+      "returned_count": 5,
+      "uncertain": false
+    },
+    {
+      "dependency": "qdrant-client",
+      "expected_evidence_classification": "api_usage",
+      "expected_relevant_count": 1,
+      "false_positive_results": 0,
+      "id": "qdrant-retriever",
+      "precision_at_5": 0.2,
+      "recall_at_5": 1.0,
+      "reciprocal_rank": 1.0,
+      "relevant_evidence_exists": true,
+      "relevant_ranks": [
+        1
+      ],
+      "retrieved": [
+        {
+          "line_end": 335,
+          "line_start": 301,
+          "path": "vulnerability_agent/retrieval.py",
+          "rank": 1,
+          "relevant": true,
+          "symbol": "LocalCodeRetriever.__init__"
+        },
+        {
+          "line_end": 386,
+          "line_start": 354,
+          "path": "vulnerability_agent/retrieval.py",
+          "rank": 2,
+          "relevant": false,
+          "symbol": "LocalCodeRetriever.index_sources"
+        },
+        {
+          "line_end": 239,
+          "line_start": 212,
+          "path": "tests/test_retrieval.py",
+          "rank": 3,
+          "relevant": false,
+          "symbol": "test_qdrant_local_index_searches_and_reloads_persisted_chunks"
+        },
+        {
+          "line_end": 439,
+          "line_start": 404,
+          "path": "vulnerability_agent/retrieval.py",
+          "rank": 4,
+          "relevant": false,
+          "symbol": "LocalCodeRetriever.retrieve"
+        },
+        {
+          "line_end": 402,
+          "line_start": 394,
+          "path": "vulnerability_agent/retrieval.py",
+          "rank": 5,
+          "relevant": false,
+          "symbol": "LocalCodeRetriever._load_documents"
+        }
+      ],
+      "returned_count": 5,
+      "uncertain": false
+    },
+    {
+      "dependency": "fastembed",
+      "expected_evidence_classification": "api_usage",
+      "expected_relevant_count": 1,
+      "false_positive_results": 0,
+      "id": "fastembed-model",
+      "precision_at_5": 0.2,
+      "recall_at_5": 1.0,
+      "reciprocal_rank": 1.0,
+      "relevant_evidence_exists": true,
+      "relevant_ranks": [
+        1
+      ],
+      "retrieved": [
+        {
+          "line_end": 335,
+          "line_start": 301,
+          "path": "vulnerability_agent/retrieval.py",
+          "rank": 1,
+          "relevant": true,
+          "symbol": "LocalCodeRetriever.__init__"
+        },
+        {
+          "line_end": 300,
+          "line_start": 298,
+          "path": "vulnerability_agent/retrieval.py",
+          "rank": 2,
+          "relevant": false,
+          "symbol": "LocalCodeRetriever"
+        },
+        {
+          "line_end": 18,
+          "line_start": 14,
+          "path": "vulnerability_agent/dependencies.py",
+          "rank": 3,
+          "relevant": false,
+          "symbol": "_model"
+        },
+        {
+          "line_end": 237,
+          "line_start": 217,
+          "path": "tests/test_dependabot_review.py",
+          "rank": 4,
+          "relevant": false,
+          "symbol": "test_review_graph_stores_ai_text_after_osv_contradiction_filtering"
+        },
+        {
+          "line_end": 214,
+          "line_start": 198,
+          "path": "tests/test_dependabot_review.py",
+          "rank": 5,
+          "relevant": false,
+          "symbol": "test_review_graph_runs_ai_analysis_and_skips_comment_by_default"
+        }
+      ],
+      "returned_count": 5,
+      "uncertain": false
+    },
+    {
+      "dependency": "tree-sitter-language-pack",
+      "expected_evidence_classification": "api_usage",
+      "expected_relevant_count": 1,
+      "false_positive_results": 0,
+      "id": "tree-sitter-parser",
+      "precision_at_5": 0.2,
+      "recall_at_5": 1.0,
+      "reciprocal_rank": 1.0,
+      "relevant_evidence_exists": true,
+      "relevant_ranks": [
+        1
+      ],
+      "retrieved": [
+        {
+          "line_end": 169,
+          "line_start": 122,
+          "path": "vulnerability_agent/retrieval.py",
+          "rank": 1,
+          "relevant": true,
+          "symbol": "_tree_sitter_chunks"
+        },
+        {
+          "line_end": 218,
+          "line_start": 189,
+          "path": "vulnerability_agent/retrieval.py",
+          "rank": 2,
+          "relevant": false,
+          "symbol": "_javascript_fallback_chunks"
+        },
+        {
+          "line_end": 234,
+          "line_start": 221,
+          "path": "vulnerability_agent/retrieval.py",
+          "rank": 3,
+          "relevant": false,
+          "symbol": "chunk_source"
+        },
+        {
+          "line_end": 50,
+          "line_start": 41,
+          "path": "tests/test_retrieval.py",
+          "rank": 4,
+          "relevant": false,
+          "symbol": "test_javascript_chunking_preserves_common_declaration_boundaries"
+        },
+        {
+          "line_end": 186,
+          "line_start": 172,
+          "path": "vulnerability_agent/retrieval.py",
+          "rank": 5,
+          "relevant": false,
+          "symbol": "_line_chunks"
+        }
+      ],
+      "returned_count": 5,
+      "uncertain": false
+    },
+    {
+      "dependency": "python-dotenv",
+      "expected_evidence_classification": "api_usage",
+      "expected_relevant_count": 1,
+      "false_positive_results": 0,
+      "id": "dotenv-load",
+      "precision_at_5": 0.0,
+      "recall_at_5": 0.0,
+      "reciprocal_rank": 0.0,
+      "relevant_evidence_exists": true,
+      "relevant_ranks": [],
+      "retrieved": [
+        {
+          "line_end": 142,
+          "line_start": 121,
+          "path": "vulnerability_agent/state.py",
+          "rank": 1,
+          "relevant": false,
+          "symbol": "_project_python"
+        },
+        {
+          "line_end": 1524,
+          "line_start": 1483,
+          "path": "vulnerability_agent/dependabot_review.py",
+          "rank": 2,
+          "relevant": false,
+          "symbol": "_prepare_review_environment"
+        },
+        {
+          "line_end": 1463,
+          "line_start": 1457,
+          "path": "vulnerability_agent/dependabot_review.py",
+          "rank": 3,
+          "relevant": false,
+          "symbol": "_safe_child_environment"
+        },
+        {
+          "line_end": 30,
+          "line_start": 17,
+          "path": "tests/test_branch_and_project_environment.py",
+          "rank": 4,
+          "relevant": false,
+          "symbol": "test_test_command_uses_target_repo_venv_for_temporary_worktree"
+        },
+        {
+          "line_end": 841,
+          "line_start": 803,
+          "path": "vulnerability_agent/dependabot_review.py",
+          "rank": 5,
+          "relevant": false,
+          "symbol": "_compact_test_result"
+        }
+      ],
+      "returned_count": 5,
+      "uncertain": false
+    },
+    {
+      "dependency": "tomli",
+      "expected_evidence_classification": "direct_import",
+      "expected_relevant_count": 1,
+      "false_positive_results": 0,
+      "id": "tomli-aliased-import",
+      "precision_at_5": 0.2,
+      "recall_at_5": 1.0,
+      "reciprocal_rank": 0.3333333333333333,
+      "relevant_evidence_exists": true,
+      "relevant_ranks": [
+        3
+      ],
+      "retrieved": [
+        {
+          "line_end": 447,
+          "line_start": 405,
+          "path": "vulnerability_agent/dependabot_review.py",
+          "rank": 1,
+          "relevant": false,
+          "symbol": "_direct_dependency_names"
+        },
+        {
+          "line_end": 526,
+          "line_start": 514,
+          "path": "osv_service.py",
+          "rank": 2,
+          "relevant": false,
+          "symbol": "parse_python_lock"
+        },
+        {
+          "line_end": 402,
+          "line_start": 369,
+          "path": "osv_service.py",
+          "rank": 3,
+          "relevant": true,
+          "symbol": "poetry_declared_constraint"
+        },
+        {
+          "line_end": 169,
+          "line_start": 122,
+          "path": "vulnerability_agent/retrieval.py",
+          "rank": 4,
+          "relevant": false,
+          "symbol": "_tree_sitter_chunks"
+        },
+        {
+          "line_end": 511,
+          "line_start": 450,
+          "path": "vulnerability_agent/dependabot_review.py",
+          "rank": 5,
+          "relevant": false,
+          "symbol": "_dependency_index"
+        }
+      ],
+      "returned_count": 5,
+      "uncertain": false
+    },
+    {
+      "dependency": "pytest",
+      "expected_evidence_classification": "test_only",
+      "expected_relevant_count": 1,
+      "false_positive_results": 0,
+      "id": "pytest-test-only",
+      "precision_at_5": 0.2,
+      "recall_at_5": 1.0,
+      "reciprocal_rank": 1.0,
+      "relevant_evidence_exists": true,
+      "relevant_ranks": [
+        1
+      ],
+      "retrieved": [
+        {
+          "line_end": 49,
+          "line_start": 46,
+          "path": "tests/test_mcp_policy.py",
+          "rank": 1,
+          "relevant": true,
+          "symbol": "test_proxy_rejects_non_allowlisted_tool"
+        },
+        {
+          "line_end": 88,
+          "line_start": 71,
+          "path": "tests/test_mcp_policy.py",
+          "rank": 2,
+          "relevant": false,
+          "symbol": "test_audit_log_persists_allowed_denied_and_error_calls"
+        },
+        {
+          "line_end": 43,
+          "line_start": 39,
+          "path": "tests/test_mcp_policy.py",
+          "rank": 3,
+          "relevant": false,
+          "symbol": "test_proxy_rejects_unsafe_git_staging"
+        },
+        {
+          "line_end": 36,
+          "line_start": 32,
+          "path": "tests/test_mcp_policy.py",
+          "rank": 4,
+          "relevant": false,
+          "symbol": "test_proxy_rejects_escape_and_likely_secret_paths"
+        },
+        {
+          "line_end": 68,
+          "line_start": 52,
+          "path": "tests/test_mcp_policy.py",
+          "rank": 5,
+          "relevant": false,
+          "symbol": "test_proxy_batches_safe_files_but_rejects_secret_paths"
+        }
+      ],
+      "returned_count": 5,
+      "uncertain": false
+    },
+    {
+      "dependency": "pytest-asyncio",
+      "expected_evidence_classification": "test_only",
+      "expected_relevant_count": 1,
+      "false_positive_results": 0,
+      "id": "pytest-async-test-only",
+      "precision_at_5": 0.2,
+      "recall_at_5": 1.0,
+      "reciprocal_rank": 1.0,
+      "relevant_evidence_exists": true,
+      "relevant_ranks": [
+        1
+      ],
+      "retrieved": [
+        {
+          "line_end": 287,
+          "line_start": 276,
+          "path": "tests/test_osv_service.py",
+          "rank": 1,
+          "relevant": true,
+          "symbol": "test_query_osv_parses_vulnerabilities"
+        },
+        {
+          "line_end": 297,
+          "line_start": 290,
+          "path": "tests/test_osv_service.py",
+          "rank": 2,
+          "relevant": false,
+          "symbol": "test_scan_packages_attaches_package_to_vulnerability"
+        },
+        {
+          "line_end": 572,
+          "line_start": 550,
+          "path": "osv_service.py",
+          "rank": 3,
+          "relevant": false,
+          "symbol": "scan_packages"
+        },
+        {
+          "line_end": 547,
+          "line_start": 529,
+          "path": "osv_service.py",
+          "rank": 4,
+          "relevant": false,
+          "symbol": "query_osv"
+        },
+        {
+          "line_end": 124,
+          "line_start": 112,
+          "path": "tests/test_agent_graph.py",
+          "rank": 5,
+          "relevant": false,
+          "symbol": "FakeHTTP.post"
+        }
+      ],
+      "returned_count": 5,
+      "uncertain": false
+    },
+    {
+      "dependency": "httpx",
+      "expected_evidence_classification": "test_only",
+      "expected_relevant_count": 1,
+      "false_positive_results": 0,
+      "id": "httpx-mocked-test",
+      "precision_at_5": 0.2,
+      "recall_at_5": 1.0,
+      "reciprocal_rank": 1.0,
+      "relevant_evidence_exists": true,
+      "relevant_ranks": [
+        1
+      ],
+      "retrieved": [
+        {
+          "line_end": 61,
+          "line_start": 31,
+          "path": "tests/test_dependabot_review.py",
+          "rank": 1,
+          "relevant": true,
+          "symbol": "test_release_lookup_status_is_explicit_and_machine_readable"
+        },
+        {
+          "line_end": 526,
+          "line_start": 513,
+          "path": "vulnerability_agent/review_graph.py",
+          "rank": 2,
+          "relevant": false,
+          "symbol": "_raise_for_github_status"
+        },
+        {
+          "line_end": 325,
+          "line_start": 310,
+          "path": "tests/test_dependabot_review.py",
+          "rank": 3,
+          "relevant": false,
+          "symbol": "test_comment_failure_includes_github_api_message"
+        },
+        {
+          "line_end": 757,
+          "line_start": 752,
+          "path": "tests/test_workstream_f_regressions.py",
+          "rank": 4,
+          "relevant": false,
+          "symbol": "test_ai_review_cannot_invent_upstream_release_explanation_after_lookup_failure"
+        },
+        {
+          "line_end": 870,
+          "line_start": 852,
+          "path": "tests/test_dependabot_review.py",
+          "rank": 5,
+          "relevant": false,
+          "symbol": "test_review_rejects_non_dependabot_pr_before_fetching_refs"
+        }
+      ],
+      "returned_count": 5,
+      "uncertain": false
+    },
+    {
+      "dependency": "langchain-core",
+      "expected_evidence_classification": "direct_import",
+      "expected_relevant_count": 1,
+      "false_positive_results": 0,
+      "id": "langchain-core-transitive-message-use",
+      "precision_at_5": 0.2,
+      "recall_at_5": 1.0,
+      "reciprocal_rank": 1.0,
+      "relevant_evidence_exists": true,
+      "relevant_ranks": [
+        1
+      ],
+      "retrieved": [
+        {
+          "line_end": 171,
+          "line_start": 167,
+          "path": "agents/agent.py",
+          "rank": 1,
+          "relevant": true,
+          "symbol": "Agent.call_tools_llm"
+        },
+        {
+          "line_end": 43,
+          "line_start": 31,
+          "path": "tests/test_agent.py",
+          "rank": 2,
+          "relevant": false,
+          "symbol": "test_model_node_adds_system_prompt_and_returns_model_message"
+        },
+        {
+          "line_end": 185,
+          "line_start": 173,
+          "path": "agents/agent.py",
+          "rank": 3,
+          "relevant": false,
+          "symbol": "Agent.invoke_tools"
+        },
+        {
+          "line_end": 69,
+          "line_start": 62,
+          "path": "tests/test_agent.py",
+          "rank": 4,
+          "relevant": false,
+          "symbol": "test_tool_node_returns_a_retry_message_for_unknown_tool"
+        },
+        {
+          "line_end": 25,
+          "line_start": 24,
+          "path": "agents/agent.py",
+          "rank": 5,
+          "relevant": false,
+          "symbol": "AgentState"
+        }
+      ],
+      "returned_count": 5,
+      "uncertain": false
+    },
+    {
+      "dependency": "langchain-core",
+      "expected_evidence_classification": "api_usage",
+      "expected_relevant_count": 1,
+      "false_positive_results": 0,
+      "id": "langchain-core-transitive-tool-use",
+      "precision_at_5": 0.2,
+      "recall_at_5": 1.0,
+      "reciprocal_rank": 0.3333333333333333,
+      "relevant_evidence_exists": true,
+      "relevant_ranks": [
+        3
+      ],
+      "retrieved": [
+        {
+          "line_end": 92,
+          "line_start": 72,
+          "path": "tests/test_agent.py",
+          "rank": 1,
+          "relevant": false,
+          "symbol": "test_flights_tool_maps_arguments_and_returns_search_results"
+        },
+        {
+          "line_end": 59,
+          "line_start": 46,
+          "path": "tests/test_agent.py",
+          "rank": 2,
+          "relevant": false,
+          "symbol": "test_tool_node_dispatches_known_tools_and_returns_tool_messages"
+        },
+        {
+          "line_end": 56,
+          "line_start": 25,
+          "path": "agents/tools/flights_finder.py",
+          "rank": 3,
+          "relevant": true,
+          "symbol": "flights_finder"
+        },
+        {
+          "line_end": 105,
+          "line_start": 95,
+          "path": "tests/test_agent.py",
+          "rank": 4,
+          "relevant": false,
+          "symbol": "test_flights_tool_returns_provider_error_as_text"
+        },
+        {
+          "line_end": 22,
+          "line_start": 19,
+          "path": "tests/test_agent.py",
+          "rank": 5,
+          "relevant": false,
+          "symbol": "test_exists_action_routes_tool_calls_to_tool_node"
+        }
+      ],
+      "returned_count": 5,
+      "uncertain": false
+    },
+    {
+      "dependency": "langchain",
+      "expected_evidence_classification": "direct_import",
+      "expected_relevant_count": 1,
+      "false_positive_results": 0,
+      "id": "langchain-direct-distribution-import",
+      "precision_at_5": 0.2,
+      "recall_at_5": 1.0,
+      "reciprocal_rank": 1.0,
+      "relevant_evidence_exists": true,
+      "relevant_ranks": [
+        1
+      ],
+      "retrieved": [
+        {
+          "line_end": 18,
+          "line_start": 10,
+          "path": "agents/tools/flights_finder.py",
+          "rank": 1,
+          "relevant": true,
+          "symbol": "FlightsInput"
+        },
+        {
+          "line_end": 22,
+          "line_start": 21,
+          "path": "agents/tools/flights_finder.py",
+          "rank": 2,
+          "relevant": false,
+          "symbol": "FlightsInputSchema"
+        },
+        {
+          "line_end": 24,
+          "line_start": 23,
+          "path": "agents/tools/hotels_finder.py",
+          "rank": 3,
+          "relevant": false,
+          "symbol": "HotelsInputSchema"
+        },
+        {
+          "line_end": 59,
+          "line_start": 46,
+          "path": "tests/test_agent.py",
+          "rank": 4,
+          "relevant": false,
+          "symbol": "test_tool_node_dispatches_known_tools_and_returns_tool_messages"
+        },
+        {
+          "line_end": 137,
+          "line_start": 128,
+          "path": "app.py",
+          "rank": 5,
+          "relevant": false,
+          "symbol": "main"
+        }
+      ],
+      "returned_count": 5,
+      "uncertain": false
+    },
+    {
+      "dependency": "serpapi",
+      "expected_evidence_classification": "api_usage",
+      "expected_relevant_count": 1,
+      "false_positive_results": 0,
+      "id": "serpapi-production-api",
+      "precision_at_5": 0.2,
+      "recall_at_5": 1.0,
+      "reciprocal_rank": 1.0,
+      "relevant_evidence_exists": true,
+      "relevant_ranks": [
+        1
+      ],
+      "retrieved": [
+        {
+          "line_end": 56,
+          "line_start": 25,
+          "path": "agents/tools/flights_finder.py",
+          "rank": 1,
+          "relevant": true,
+          "symbol": "flights_finder"
+        },
+        {
+          "line_end": 92,
+          "line_start": 72,
+          "path": "tests/test_agent.py",
+          "rank": 2,
+          "relevant": false,
+          "symbol": "test_flights_tool_maps_arguments_and_returns_search_results"
+        },
+        {
+          "line_end": 54,
+          "line_start": 27,
+          "path": "agents/tools/hotels_finder.py",
+          "rank": 3,
+          "relevant": false,
+          "symbol": "hotels_finder"
+        },
+        {
+          "line_end": 125,
+          "line_start": 108,
+          "path": "tests/test_agent.py",
+          "rank": 4,
+          "relevant": false,
+          "symbol": "test_hotels_tool_returns_at_most_five_properties"
+        },
+        {
+          "line_end": 105,
+          "line_start": 95,
+          "path": "tests/test_agent.py",
+          "rank": 5,
+          "relevant": false,
+          "symbol": "test_flights_tool_returns_provider_error_as_text"
+        }
+      ],
+      "returned_count": 5,
+      "uncertain": false
+    },
+    {
+      "dependency": "serpapi",
+      "expected_evidence_classification": "test_only",
+      "expected_relevant_count": 1,
+      "false_positive_results": 0,
+      "id": "serpapi-mocked-test-only",
+      "precision_at_5": 0.2,
+      "recall_at_5": 1.0,
+      "reciprocal_rank": 0.3333333333333333,
+      "relevant_evidence_exists": true,
+      "relevant_ranks": [
+        3
+      ],
+      "retrieved": [
+        {
+          "line_end": 105,
+          "line_start": 95,
+          "path": "tests/test_agent.py",
+          "rank": 1,
+          "relevant": false,
+          "symbol": "test_flights_tool_returns_provider_error_as_text"
+        },
+        {
+          "line_end": 141,
+          "line_start": 128,
+          "path": "tests/test_agent.py",
+          "rank": 2,
+          "relevant": false,
+          "symbol": "test_hotels_tool_propagates_provider_errors"
+        },
+        {
+          "line_end": 92,
+          "line_start": 72,
+          "path": "tests/test_agent.py",
+          "rank": 3,
+          "relevant": true,
+          "symbol": "test_flights_tool_maps_arguments_and_returns_search_results"
+        },
+        {
+          "line_end": 125,
+          "line_start": 108,
+          "path": "tests/test_agent.py",
+          "rank": 4,
+          "relevant": false,
+          "symbol": "test_hotels_tool_returns_at_most_five_properties"
+        },
+        {
+          "line_end": 204,
+          "line_start": 167,
+          "path": "tests/test_agent.py",
+          "rank": 5,
+          "relevant": false,
+          "symbol": "test_email_sender_formats_and_sends_email"
+        }
+      ],
+      "returned_count": 5,
+      "uncertain": false
+    },
+    {
+      "dependency": "sendgrid",
+      "expected_evidence_classification": "api_usage",
+      "expected_relevant_count": 1,
+      "false_positive_results": 0,
+      "id": "sendgrid-production-api",
+      "precision_at_5": 0.2,
+      "recall_at_5": 1.0,
+      "reciprocal_rank": 1.0,
+      "relevant_evidence_exists": true,
+      "relevant_ranks": [
+        1
+      ],
+      "retrieved": [
+        {
+          "line_end": 165,
+          "line_start": 149,
+          "path": "agents/agent.py",
+          "rank": 1,
+          "relevant": true,
+          "symbol": "Agent.email_sender"
+        },
+        {
+          "line_end": 204,
+          "line_start": 167,
+          "path": "tests/test_agent.py",
+          "rank": 2,
+          "relevant": false,
+          "symbol": "test_email_sender_formats_and_sends_email"
+        },
+        {
+          "line_end": 27,
+          "line_start": 17,
+          "path": "app.py",
+          "rank": 3,
+          "relevant": false,
+          "symbol": "send_email"
+        },
+        {
+          "line_end": 125,
+          "line_start": 112,
+          "path": "app.py",
+          "rank": 4,
+          "relevant": false,
+          "symbol": "render_email_form"
+        },
+        {
+          "line_end": 14,
+          "line_start": 11,
+          "path": "app.py",
+          "rank": 5,
+          "relevant": false,
+          "symbol": "populate_envs"
+        }
+      ],
+      "returned_count": 5,
+      "uncertain": false
+    },
+    {
+      "dependency": "sendgrid",
+      "expected_evidence_classification": "test_only",
+      "expected_relevant_count": 1,
+      "false_positive_results": 0,
+      "id": "sendgrid-mocked-test-only",
+      "precision_at_5": 0.2,
+      "recall_at_5": 1.0,
+      "reciprocal_rank": 1.0,
+      "relevant_evidence_exists": true,
+      "relevant_ranks": [
+        1
+      ],
+      "retrieved": [
+        {
+          "line_end": 204,
+          "line_start": 167,
+          "path": "tests/test_agent.py",
+          "rank": 1,
+          "relevant": true,
+          "symbol": "test_email_sender_formats_and_sends_email"
+        },
+        {
+          "line_end": 164,
+          "line_start": 144,
+          "path": "tests/test_agent.py",
+          "rank": 2,
+          "relevant": false,
+          "symbol": "test_graph_pauses_before_email_delivery_without_calling_openai"
+        },
+        {
+          "line_end": 28,
+          "line_start": 25,
+          "path": "tests/test_agent.py",
+          "rank": 3,
+          "relevant": false,
+          "symbol": "test_exists_action_routes_final_answer_to_email_checkpoint"
+        },
+        {
+          "line_end": 165,
+          "line_start": 149,
+          "path": "agents/agent.py",
+          "rank": 4,
+          "relevant": false,
+          "symbol": "Agent.email_sender"
+        },
+        {
+          "line_end": 27,
+          "line_start": 17,
+          "path": "app.py",
+          "rank": 5,
+          "relevant": false,
+          "symbol": "send_email"
+        }
+      ],
+      "returned_count": 5,
+      "uncertain": false
+    },
+    {
+      "dependency": "mcp-server-git",
+      "expected_evidence_classification": "configuration",
+      "expected_relevant_count": 0,
+      "false_positive_results": 5,
+      "id": "mcp-server-git-config-only",
+      "precision_at_5": 0.0,
+      "recall_at_5": null,
+      "reciprocal_rank": null,
+      "relevant_evidence_exists": false,
+      "relevant_ranks": [],
+      "retrieved": [
+        {
+          "line_end": 221,
+          "line_start": 215,
+          "path": "mcp_client.py",
+          "rank": 1,
+          "relevant": false,
+          "symbol": "MCPClient._config"
+        },
+        {
+          "line_end": 29,
+          "line_start": 25,
+          "path": "mcp_client.py",
+          "rank": 2,
+          "relevant": false,
+          "symbol": "MCPCallError.__init__"
+        },
+        {
+          "line_end": 188,
+          "line_start": 155,
+          "path": "mcp_client.py",
+          "rank": 3,
+          "relevant": false,
+          "symbol": "MCPPolicyProxy._authorize"
+        },
+        {
+          "line_end": 271,
+          "line_start": 261,
+          "path": "mcp_client.py",
+          "rank": 4,
+          "relevant": false,
+          "symbol": "MCPClient.call"
+        },
+        {
+          "line_end": 119,
+          "line_start": 108,
+          "path": "mcp_client.py",
+          "rank": 5,
+          "relevant": false,
+          "symbol": "MCPPolicyProxy"
+        }
+      ],
+      "returned_count": 5,
+      "uncertain": false
+    },
+    {
+      "dependency": "aiohttp",
+      "expected_evidence_classification": "no_evidence",
+      "expected_relevant_count": 0,
+      "false_positive_results": 5,
+      "id": "aiohttp-transitive-no-source-use",
+      "precision_at_5": 0.0,
+      "recall_at_5": null,
+      "reciprocal_rank": null,
+      "relevant_evidence_exists": false,
+      "relevant_ranks": [],
+      "retrieved": [
+        {
+          "line_end": 164,
+          "line_start": 144,
+          "path": "tests/test_agent.py",
+          "rank": 1,
+          "relevant": false,
+          "symbol": "test_graph_pauses_before_email_delivery_without_calling_openai"
+        },
+        {
+          "line_end": 141,
+          "line_start": 128,
+          "path": "tests/test_agent.py",
+          "rank": 2,
+          "relevant": false,
+          "symbol": "test_hotels_tool_propagates_provider_errors"
+        },
+        {
+          "line_end": 140,
+          "line_start": 124,
+          "path": "agents/agent.py",
+          "rank": 3,
+          "relevant": false,
+          "symbol": "Agent.__init__"
+        },
+        {
+          "line_end": 109,
+          "line_start": 90,
+          "path": "app.py",
+          "rank": 4,
+          "relevant": false,
+          "symbol": "process_query"
+        },
+        {
+          "line_end": 25,
+          "line_start": 24,
+          "path": "agents/agent.py",
+          "rank": 5,
+          "relevant": false,
+          "symbol": "AgentState"
+        }
+      ],
+      "returned_count": 5,
+      "uncertain": false
+    },
+    {
+      "dependency": "GitPython",
+      "expected_evidence_classification": "no_evidence",
+      "expected_relevant_count": 0,
+      "false_positive_results": 5,
+      "id": "gitpython-transitive-no-source-use",
+      "precision_at_5": 0.0,
+      "recall_at_5": null,
+      "reciprocal_rank": null,
+      "relevant_evidence_exists": false,
+      "relevant_ranks": [],
+      "retrieved": [
+        {
+          "line_end": 204,
+          "line_start": 167,
+          "path": "tests/test_agent.py",
+          "rank": 1,
+          "relevant": false,
+          "symbol": "test_email_sender_formats_and_sends_email"
+        },
+        {
+          "line_end": 69,
+          "line_start": 62,
+          "path": "tests/test_agent.py",
+          "rank": 2,
+          "relevant": false,
+          "symbol": "test_tool_node_returns_a_retry_message_for_unknown_tool"
+        },
+        {
+          "line_end": 59,
+          "line_start": 46,
+          "path": "tests/test_agent.py",
+          "rank": 3,
+          "relevant": false,
+          "symbol": "test_tool_node_dispatches_known_tools_and_returns_tool_messages"
+        },
+        {
+          "line_end": 28,
+          "line_start": 25,
+          "path": "tests/test_agent.py",
+          "rank": 4,
+          "relevant": false,
+          "symbol": "test_exists_action_routes_final_answer_to_email_checkpoint"
+        },
+        {
+          "line_end": 14,
+          "line_start": 11,
+          "path": "app.py",
+          "rank": 5,
+          "relevant": false,
+          "symbol": "populate_envs"
+        }
+      ],
+      "returned_count": 5,
+      "uncertain": false
+    },
+    {
+      "dependency": "requests",
+      "expected_evidence_classification": "no_evidence",
+      "expected_relevant_count": 0,
+      "false_positive_results": 5,
+      "id": "requests-transitive-no-source-use",
+      "precision_at_5": 0.0,
+      "recall_at_5": null,
+      "reciprocal_rank": null,
+      "relevant_evidence_exists": false,
+      "relevant_ranks": [],
+      "retrieved": [
+        {
+          "line_end": 204,
+          "line_start": 167,
+          "path": "tests/test_agent.py",
+          "rank": 1,
+          "relevant": false,
+          "symbol": "test_email_sender_formats_and_sends_email"
+        },
+        {
+          "line_end": 137,
+          "line_start": 128,
+          "path": "app.py",
+          "rank": 2,
+          "relevant": false,
+          "symbol": "main"
+        },
+        {
+          "line_end": 109,
+          "line_start": 90,
+          "path": "app.py",
+          "rank": 3,
+          "relevant": false,
+          "symbol": "process_query"
+        },
+        {
+          "line_end": 164,
+          "line_start": 144,
+          "path": "tests/test_agent.py",
+          "rank": 4,
+          "relevant": false,
+          "symbol": "test_graph_pauses_before_email_delivery_without_calling_openai"
+        },
+        {
+          "line_end": 54,
+          "line_start": 27,
+          "path": "agents/tools/hotels_finder.py",
+          "rank": 5,
+          "relevant": false,
+          "symbol": "hotels_finder"
+        }
+      ],
+      "returned_count": 5,
+      "uncertain": false
+    },
+    {
+      "dependency": "Werkzeug",
+      "expected_evidence_classification": "no_evidence",
+      "expected_relevant_count": 0,
+      "false_positive_results": 5,
+      "id": "werkzeug-no-source-use",
+      "precision_at_5": 0.0,
+      "recall_at_5": null,
+      "reciprocal_rank": null,
+      "relevant_evidence_exists": false,
+      "relevant_ranks": [],
+      "retrieved": [
+        {
+          "line_end": 692,
+          "line_start": 677,
+          "path": "tests/test_workstream_f_regressions.py",
+          "rank": 1,
+          "relevant": false,
+          "symbol": "test_werkzeug_changed_dependency_is_consistent_in_summary_and_detail"
+        },
+        {
+          "line_end": 444,
+          "line_start": 440,
+          "path": "tests/test_agent_graph.py",
+          "rank": 2,
+          "relevant": false,
+          "symbol": "test_retry_routing_respects_attempt_limit"
+        },
+        {
+          "line_end": 1660,
+          "line_start": 1571,
+          "path": "vulnerability_agent/dependabot_review.py",
+          "rank": 3,
+          "relevant": false,
+          "symbol": "review_dependabot_pull_request"
+        },
+        {
+          "line_end": 44,
+          "line_start": 34,
+          "path": "vulnerability_agent/dependabot_review.py",
+          "rank": 4,
+          "relevant": false,
+          "symbol": "parse_pull_request_reference"
+        },
+        {
+          "line_end": 106,
+          "line_start": 17,
+          "path": "vulnerability_agent/nodes/pull_requests.py",
+          "rank": 5,
+          "relevant": false,
+          "symbol": "node_create_pull_request"
+        }
+      ],
+      "returned_count": 5,
+      "uncertain": false
+    },
+    {
+      "dependency": "cryptography",
+      "expected_evidence_classification": "semantic_context",
+      "expected_relevant_count": 1,
+      "false_positive_results": 0,
+      "id": "cryptography-weak-security-context",
+      "precision_at_5": 0.0,
+      "recall_at_5": null,
+      "reciprocal_rank": null,
+      "relevant_evidence_exists": true,
+      "relevant_ranks": [],
+      "retrieved": [
+        {
+          "line_end": 42,
+          "line_start": 15,
+          "path": "tests/test_security_guardrails.py",
+          "rank": 1,
+          "relevant": false,
+          "symbol": "test_secure_runner_strips_secrets"
+        },
+        {
+          "line_end": 1551,
+          "line_start": 1527,
+          "path": "vulnerability_agent/dependabot_review.py",
+          "rank": 2,
+          "relevant": false,
+          "symbol": "_test"
+        },
+        {
+          "line_end": 112,
+          "line_start": 30,
+          "path": "vulnerability_agent/review_graph.py",
+          "rank": 3,
+          "relevant": false,
+          "symbol": "render_review_prompt"
+        },
+        {
+          "line_end": 265,
+          "line_start": 259,
+          "path": "tests/test_dependabot_review.py",
+          "rank": 4,
+          "relevant": false,
+          "symbol": "test_review_prompt_bounds_and_marks_repository_text_as_untrusted"
+        },
+        {
+          "line_end": 439,
+          "line_start": 404,
+          "path": "vulnerability_agent/retrieval.py",
+          "rank": 5,
+          "relevant": false,
+          "symbol": "LocalCodeRetriever.retrieve"
+        }
+      ],
+      "returned_count": 5,
+      "uncertain": true
+    }
+  ],
+  "dataset_version": 1,
+  "embedding_model": "BAAI/bge-small-en-v1.5",
+  "evaluation_version": 1,
+  "metric_definitions": {
+    "mrr": "Mean reciprocal rank of the first relevant result over evidence-positive cases; no-evidence and uncertain cases excluded.",
+    "precision_at_5": "Relevant results in the returned ranking divided by 5; unavailable slots count as non-relevant.",
+    "recall_at_5": "Distinct labelled locations retrieved in top 5 divided by labelled relevant locations; no-evidence and uncertain cases excluded.",
+    "uncertain_cases": "Reported per-case but excluded from aggregate relevance metrics."
+  },
+  "retrieval_limit": 5,
+  "retriever": "LocalCodeRetriever",
+  "summary": {
+    "case_count": 30,
+    "category_metrics": {
+      "api_usage": {
+        "case_count": 15,
+        "mrr": 0.7555555555555556,
+        "no_evidence_false_positive_results": 0,
+        "precision_at_5": 0.17333333333333334,
+        "recall_at_5": 0.8666666666666667,
+        "with_relevant_evidence": 15,
+        "without_relevant_evidence": 0
+      },
+      "configuration": {
+        "case_count": 1,
+        "mrr": null,
+        "no_evidence_false_positive_results": 5,
+        "precision_at_5": 0.0,
+        "recall_at_5": null,
+        "with_relevant_evidence": 0,
+        "without_relevant_evidence": 1
+      },
+      "direct_import": {
+        "case_count": 4,
+        "mrr": 0.8333333333333333,
+        "no_evidence_false_positive_results": 0,
+        "precision_at_5": 0.2,
+        "recall_at_5": 1.0,
+        "with_relevant_evidence": 4,
+        "without_relevant_evidence": 0
+      },
+      "no_evidence": {
+        "case_count": 4,
+        "mrr": null,
+        "no_evidence_false_positive_results": 20,
+        "precision_at_5": 0.0,
+        "recall_at_5": null,
+        "with_relevant_evidence": 0,
+        "without_relevant_evidence": 4
+      },
+      "test_only": {
+        "case_count": 5,
+        "mrr": 0.8666666666666668,
+        "no_evidence_false_positive_results": 0,
+        "precision_at_5": 0.2,
+        "recall_at_5": 1.0,
+        "with_relevant_evidence": 5,
+        "without_relevant_evidence": 0
+      }
+    },
+    "mrr": 0.7916666666666666,
+    "no_evidence_false_positive_case_count": 5,
+    "no_evidence_false_positive_result_count": 25,
+    "precision_at_5": 0.15172413793103454,
+    "recall_at_5": 0.9166666666666666,
+    "scored_case_count": 29,
+    "uncertain_case_count": 1,
+    "with_relevant_evidence": 24,
+    "without_relevant_evidence": 5
+  }
+}
