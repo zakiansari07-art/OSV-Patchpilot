@@ -1,74 +1,75 @@
 # OSV Patchpilot
 
-**A Dependabot pull request review agent that turns dependency changes into test-backed, traceable security evidence.**
+**A Dependabot pull request reviewer that turns dependency updates into test-backed, traceable security evidence.**
 
-OSV Patchpilot collects evidence about an open Dependabot PR, compares dependency and OSV results between the base and updated revisions, and produces a validated report. It can optionally use an LLM to explain the evidence and post one concise comment. The review flow is read-only with respect to the PR: it does not push, edit, approve, or merge it.
+OSV Patchpilot compares the base and updated revisions, runs their tests, checks dependency versions against OSV, and retrieves source-usage clues. It produces a validated JSON report and can use an LLM to explain the evidence in a concise pull request comment. The review flow does not push changes, approve, or merge the PR.
 
-## Project at a glance
+> **The product in one view:** evidence is collected in GitHub Actions, passed as a JSON artifact to a trusted workflow, then summarized in a review comment. The comment links back to the full report.
 
-| | |
-|---|---|
-| **Language** | Python |
-| **Workflow orchestration** | LangGraph |
-| **Security data** | Google OSV API and deterministic advisory/version comparison |
-| **Source evidence** | Qdrant, FastEmbed, BM25, dense retrieval, RRF, AST/Tree-sitter chunks |
-| **Integrations** | GitHub API, read-only MCP filesystem access, OpenAI, optional LangSmith tracing |
-| **Automation** | Separate GitHub Actions evidence and trusted comment workflows |
-| **Current verification** | Full test suite and versioned retrieval evaluation; see below |
+## Product walkthrough
 
-## What this project demonstrates
+The screenshots and recording below are placeholders for sanitized captures. Add the media under `docs/assets/` and uncomment or replace the corresponding Markdown when ready. Use a public or synthetic repository, and remove tokens, private source, usernames, and other sensitive details before publishing.
 
-- **Secure CI design:** separate a job that executes dependency setup and tests from a trusted job that analyzes the artifact and may write a PR comment.
-- **Evidence-oriented AI:** gather exact commits, test outcomes, dependency changes, OSV findings, and labeled source clues before asking a model to summarize.
-- **Deterministic security logic:** classify advisory changes and validate report consistency in code; use the LLM for explanation, not authoritative vulnerability decisions.
-- **Hybrid code search:** combine lexical and vector retrieval, then qualify package evidence using import and source metadata. Preserve file, line, symbol, and evidence type for review.
-- **Defensive reporting:** validate downloaded JSON, verify PR number/repository/author/head SHA before commenting, redact likely credentials, and retain provenance.
-- **Testable integration boundaries:** OSV, GitHub, MCP, and model calls are isolated behind functions or injected clients and covered by offline tests.
+### 1. Dependabot review comment
 
-## Demo gallery
+Lead with the user-facing result: show the dependency change, base/PR test outcomes, OSV delta, source clues, artifact link, and expandable AI assessment.
 
-The repository does not include captured UI screenshots or a LangSmith trace yet. Replace these placeholders with real, sanitized captures before sharing the project. Remove secrets and private repository data from images and recordings.
+<!-- Add docs/assets/dependabot-review-comment.png -->
+<!-- ![OSV Patchpilot review comment on a Dependabot pull request](docs/assets/dependabot-review-comment.png) -->
 
-| Demo asset | Suggested capture | Suggested file |
-|---|---|---|
-| LangSmith trace GIF | Review graph nodes from collection through analysis, with sensitive values hidden. | `docs/assets/langsmith-review-trace.gif` |
-| Review report | Summary of base/PR tests, OSV delta, and labeled source locations. | `docs/assets/dependabot-review-report.png` |
-| GitHub comment | Final concise comment with evidence-artifact link and collapsed AI assessment. | `docs/assets/dependabot-review-comment.png` |
-| Actions handoff | Evidence artifact produced by the first workflow and consumed by the trusted comment workflow. | `docs/assets/github-action-evidence-workflow` |
-| Actions handoff | Comment artifact produced by the first workflow and consumed by the trusted comment workflow. | `docs/assets/github-action-evidence-workflow` |
+### 2. Structured JSON evidence report
 
-<!-- Replace the comments below with image links after adding reviewed captures. -->
+Show a readable report excerpt or editor screenshot that makes the evidence and provenance visible. Keep it focused on the summary, dependency changes, OSV results, tests, and source-usage sections.
 
-<!-- ![LangSmith Dependabot review trace](docs/assets/langsmith-review-trace.gif) -->
+<!-- Add docs/assets/dependabot-review-report.png -->
+<!-- ![Validated JSON evidence report generated by the review workflow](docs/assets/dependabot-review-report.png) -->
 
-<!-- ![Dependabot review evidence report](docs/assets/dependabot-review-report.png) -->
+### 3. LangSmith trace
 
-<!-- ![Dependabot review comment](docs/assets/dependabot-review-comment.png) -->
+A short GIF can show the analysis run and its trace details. Hide prompt content or repository-derived text that should not be public.
 
-<!-- ![GitHub Actions evidence handoff](docs/assets/actions-evidence-handoff.png) -->
+<!-- Add docs/assets/langsmith-review-trace.gif -->
+<!-- ![LangSmith trace for a Dependabot review](docs/assets/langsmith-review-trace.gif) -->
 
-## Review workflow
+### 4. Short demo video (optional)
+
+Aim for 30–60 seconds: open the Dependabot PR, show the Actions evidence run and report, reveal the posted comment, then show the corresponding LangSmith trace. Add captions so the demo works without audio. Keep the README useful without the video; upload it to GitHub or another shareable host and link it here.
+
+<!-- Replace with a GitHub video URL after publishing the sanitized demo. -->
+<!-- [Watch the 45-second OSV Patchpilot demo](https://github.com/OWNER/REPOSITORY/assets/VIDEO_ID) -->
+
+## How the review works
 
 ```mermaid
-flowchart TD
-  A[Read PR metadata and exact base/head commits] --> B[Create isolated snapshots]
-  B --> C[Prepare test environments and run base/PR tests]
-  C --> D[Compare dependencies and OSV findings]
-  D --> E[Retrieve package usage clues with hybrid RAG]
-  E --> F[Validate and save evidence JSON]
-  F --> G{Collection only?}
-  G -- Yes --> H[Upload evidence artifact]
-  G -- No --> I[Optional AI analysis]
-  I --> J{Explicit comment opt-in?}
-  J -- Yes --> K[Verify PR identity and post/update comment]
-  J -- No --> L[Save report for human review]
+flowchart LR
+  A[Dependabot pull request] --> B[Evidence workflow]
+  B --> C[Tests, dependency comparison, OSV, source clues]
+  C --> D[Validated JSON artifact]
+  D --> E[Trusted analysis workflow]
+  E --> F[AI-assisted PR comment]
+  E -. optional tracing .-> G[LangSmith]
 ```
 
-### Trust boundaries
+The evidence workflow can install dependencies and run tests from the PR snapshot. It receives no OpenAI key or write-capable GitHub token. A separate trusted `workflow_run` job checks out the reviewed agent revision, downloads JSON evidence only, validates it against the PR identity, and posts a comment only when configured. It never checks out or executes the Dependabot branch.
 
-The evidence workflow can install dependencies and run tests from the PR snapshot. It receives no OpenAI key or write-capable GitHub token. The separate `workflow_run` comment workflow checks out trusted agent code, downloads JSON evidence only, validates the report against the event’s PR identity, and posts a comment only when explicitly configured. It does not check out or execute the Dependabot branch.
+## Technical highlights
 
-The local CLI also separates collection from commenting: `--collect-only` gathers evidence without calling an LLM; `--analyze-report --post-comment` consumes a saved report and requires expected PR identity values.
+- **Security decisions stay deterministic:** code compares OSV advisory and affected-version data; the LLM explains the collected evidence rather than deciding whether a version is vulnerable.
+- **Hybrid source retrieval:** BM25 and dense search are fused with reciprocal rank fusion (RRF), then package/import and source metadata help qualify code locations.
+- **Evidence remains inspectable:** reports preserve commit identity, test results, dependency changes, OSV deltas, and labeled source locations.
+- **The comment path is guarded:** downloaded JSON is validated, PR number/repository/author/head SHA are checked, and likely credentials are redacted.
+- **Observability is optional:** LangSmith can trace model-backed analysis when configured.
+- **Integration boundaries are testable:** GitHub, OSV, MCP, and model calls are covered by offline tests.
+
+## Technology stack
+
+| Area | Technologies | Role |
+|---|---|---|
+| Language and orchestration | Python, LangGraph | Review pipeline and report analysis |
+| Security intelligence | Google OSV API | Advisory and affected-version evidence |
+| Retrieval | Qdrant, FastEmbed, BM25, dense retrieval, RRF, AST/Tree-sitter chunks | Find and qualify package usage clues |
+| Automation and integrations | GitHub Actions, GitHub API, read-only MCP filesystem access | Collect evidence and hand it to the trusted comment workflow |
+| AI and observability | OpenAI, optional LangSmith | Explain evidence and trace model-backed runs |
 
 ## Retrieval evaluation
 
