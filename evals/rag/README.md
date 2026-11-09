@@ -75,8 +75,8 @@ results but do not contribute to aggregate retrieval metrics.
 Each baseline case stores the query, expected locations, retrieved chunk text,
 and location/rank metadata. Validation checks case-ID parity, recomputes
 per-case metrics from stored chunks, and confirms aggregate metrics match.
-The current v3 baseline scores **40.74% Precision@5**, **94.42% Recall@5**,
-and **100% MRR** across 27 scored cases; one uncertain case is excluded from
+The current v3 baseline scores **38.52% Precision@5**, **91.52% Recall@5**,
+and **96.52% MRR** across 27 scored cases; one uncertain case is excluded from
 aggregate metrics. Precision is macro-averaged, so each scored query carries
 equal weight.
 

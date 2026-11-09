@@ -88,6 +88,10 @@ def test_comment_has_one_verdict_one_test_line_and_scannable_evidence():
 
     assert body.count("**Tests:**") == 1
     assert "A passing base and failing PR" not in body
+    # GitHub only starts a table on a new block, so the heading needs a blank line.
+    assert "**Advisories affecting changed dependencies**\n\n|" in body
+    # Tests and OSV must be separate lines, not one soft-wrapped paragraph.
+    assert "**Tests:**" in body and "\n\n**OSV:**" in body
     assert "**Verdict: ⚠️ Investigate before merging**" in body
     assert "| Change | Version | Relationship |" in body
     assert "| `langchain` | `0.2.16` → `0.2.17` | direct |" in body
