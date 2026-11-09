@@ -31,8 +31,8 @@
       "retrieved": [
         {
           "content": "async def query_osv(package: dict[str, str], client: httpx.AsyncClient | None = None) -> list[dict[str, Any]]:\n    \"\"\"Query OSV for a single package. A versionless query checks the package broadly.\"\"\"\n    payload: dict[str, Any] = {\"package\": {\"name\": package[\"name\"], \"ecosystem\": package[\"ecosystem\"]}}\n    if package.get(\"version\"):\n        payload[\"version\"] = package[\"version\"]\n    owned = client is None\n    http = client or httpx.AsyncClient(timeout=20.0)\n    try:\n        response = await http.post(OSV_QUERY_URL, json=payload)\n        response.raise_for_status()\n        body = response.json()\n        if not isinstance(body, dict) or not isinstance(body.get(\"vulns\", []), list):\n            raise RuntimeError(f\"OSV returned an invalid response for {package['name']}\")\n        return body.get(\"vulns\", [])\n    except httpx.HTTPError as exc:\n        raise RuntimeError(f\"OSV query failed for {package['name']}: {exc}\") from exc\n    finally:\n        if owned:\n            await http.aclose()",
-          "line_end": 382,
-          "line_start": 364,
+          "line_end": 387,
+          "line_start": 369,
           "path": "osv_service.py",
           "rank": 1,
           "relevant": true,
@@ -40,35 +40,35 @@
         },
         {
           "content": "def _raise_for_github_status(response: Any) -> None:\n    \"\"\"Raise a bounded error that preserves GitHub's useful API message.\"\"\"\n    try:\n        response.raise_for_status()\n    except httpx.HTTPStatusError as exc:\n        try:\n            payload = response.json()\n        except (TypeError, ValueError):\n            payload = getattr(response, \"text\", \"\")\n        message = payload.get(\"message\", \"\") if isinstance(payload, dict) else str(payload)\n        message = str(message).strip()[:800]\n        if message:\n            raise RuntimeError(f\"{exc}; GitHub response: {message}\") from exc\n        raise",
-          "line_end": 526,
-          "line_start": 513,
+          "line_end": 193,
+          "line_start": 180,
           "path": "vulnerability_agent/review_graph.py",
           "rank": 2,
           "relevant": false,
           "symbol": "_raise_for_github_status"
         },
         {
-          "content": "def review_dependabot_pull_request(\n    repository: str | Path,\n    pull_request: str,\n    *,\n    github_client: Any | None = None,\n    osv_client: httpx.AsyncClient | None = None,\n    usage_analyzer: Callable[[Path, list[dict[str, Any]]], list[dict[str, Any]]] | None = None,\n    release_context_lookup: Callable[[list[dict[str, Any]]], list[dict[str, Any]]] | None = None,\n) -> dict[str, Any]:\n    \"\"\"Compare base and Dependabot head without changing or pushing either ref.\n\n    Tests run through the existing environment-stripped runner. GitHub API\n    credentials are used only to read PR metadata and are never passed to tests.\n    \"\"\"\n    root = Path(repository).expanduser().resolve()\n    if not root.is_dir() or not (root / \".git\").exists():\n        raise ValueError(f\"Not a Git working tree: {root}\")\n    requested_repo, number = parse_pull_request_reference(pull_request)\n    origin_repo = _github_origin(root)\n    if requested_repo and requested_repo.casefold() != origin_repo.casefold():\n        raise ValueError(f\"PR belongs to {requested_repo}, but repository origin is {origin_repo}\")\n\n    owns_client = github_client is None\n    if github_client is None:\n        headers = {\"Accept\": \"application/vnd.github+json\", \"X-GitHub-Api-Version\": \"2022-11-28\"}\n        if os.getenv(\"GITHUB_TOKEN\"):\n            headers[\"Authorization\"] = f\"Bearer {os.environ['GITHUB_TOKEN']}\"\n        github_client = httpx.Client(headers=headers, timeout=30)\n    metadata_url = f\"https://api.github.com/repos/{origin_repo}/pulls/{number}\"\n    try:\n        response = github_client.get(metadata_url)\n        response.raise_for_status()\n        metadata = response.json()\n        # A PR can retain an older base SHA after the target branch advances.\n        # Accept that only when the reported base is an ancestor of the fetched\n        # target branch. We then test a local merge of the PR head onto today's\n        # base, which represents the code GitHub would merge. Head SHA must still\n        # match exactly; unrelated or rewritten base history is rejected.\n        ref_mismatch: dict[str, str] = {}\n        base_advanced = False\n        review_base_sha = \"\"\n        for snapshot_attempt in range(3):\n            if metadata.get(\"state\") != \"open\":\n                raise ValueError(\"This Dependabot review path currently accepts open pull requests only\")\n            if str(metadata.get(\"user\", {}).get(\"login\", \"\")).casefold() != \"dependabot[bot]\":\n                raise ValueError(\"The selected pull request was not opened by dependabot[bot]\")\n            base_branch = str(metadata.get(\"base\", {}).get(\"ref\", \"\"))\n            head_branch = str(metadata.get(\"head\", {}).get(\"ref\", \"\"))\n            base_sha = str(metadata.get(\"base\", {}).get(\"sha\", \"\"))\n            head_sha = str(metadata.get(\"head\", {}).get(\"sha\", \"\"))\n            if not all((base_branch, head_branch, base_sha, head_sha)):\n                raise ValueError(\"GitHub did not return complete base/head branch metadata\")\n\n            base_ref = f\"refs/agent-review/{number}/base\"\n            head_ref = f\"refs/agent-review/{number}/head\"\n            _git(root, \"fetch\", \"--no-tags\", \"origin\",\n                 f\"+refs/heads/{base_branch}:{base_ref}\",\n                 f\"+refs/pull/{number}/head:{head_ref}\")\n            fetched_base = _git(root, \"rev-parse\", base_ref)\n            fetched_head = _git(root, \"rev-parse\", head_ref)\n            if fetched_head == head_sha:\n                if fetched_base == base_sha:\n                    review_base_sha = base_sha\n                    break\n                # This is a safe forward movement only when the PR's recorded\n                # base commit is still in the current target branch history.\n                merge_base = _git(root, \"merge-base\", base_sha, fetched_base)\n                if merge_base == base_sha:\n                    review_base_sha = fetched_base\n                    base_advanced = True\n                    break\n\n            ref_mismatch = {\n                \"expected_base_sha\": base_sha,\n                \"fetched_base_sha\": fetched_base,\n                \"expected_head_sha\": head_sha,\n                \"fetched_head_sha\": fetched_head,\n            }\n            for ref in (base_ref, head_ref):\n                subprocess.run([\"git\", \"update-ref\", \"-d\", ref], cwd=root, capture_output=True, text=True, check=False)\n            if snapshot_attempt < 2:\n                response = github_client.get(metadata_url)\n                response.raise_for_status()\n                metadata = response.json()\n        else:\n            raise RuntimeError(\n                \"GitHub PR refs did not stabilize after 3 attempts; refusing to review a mismatched snapshot. \"\n                f\"Last comparison: {ref_mismatch}\"\n            )\n",
-          "line_end": 1637,
-          "line_start": 1548,
-          "path": "vulnerability_agent/dependabot_review.py",
+          "content": "@pytest.mark.parametrize((\"release_status\", \"body\", \"expected\"), [\n    (200, \"Release notes\", \"retrieved\"),\n    (200, \"\", \"no_release_notes\"),\n    (404, \"\", \"no_release_notes\"),\n    (403, \"\", \"lookup_failed\"),\n])\ndef test_release_lookup_status_is_explicit_and_machine_readable(monkeypatch, release_status, body, expected):\n    registry = Mock()\n    registry.status_code = 200\n    registry.raise_for_status.return_value = None\n    registry.json.return_value = {\"info\": {\"project_urls\": {\"Source\": \"https://github.com/acme/demo\"}}}\n    release = Mock()\n    release.status_code = release_status\n    if release_status == 403:\n        response = httpx.Response(403, request=httpx.Request(\"GET\", \"https://api.github.com/example\"))\n        release.raise_for_status.side_effect = httpx.HTTPStatusError(\"forbidden\", request=response.request, response=response)\n    else:\n        release.raise_for_status.return_value = None\n    release.json.return_value = {\"body\": body}\n    client = Mock()\n    client.get.side_effect = [registry, release] if release_status != 404 else [registry, release, release]\n    monkeypatch.setattr(release_notes.httpx, \"Client\", lambda **_kwargs: client)\n\n    records = review._release_context([{\"package\": \"demo\", \"ecosystem\": \"pypi\", \"head_version\": \"1.2.3\"}])\n\n    assert records[0][\"status\"] == expected\n    assert client.close.called\n    if expected == \"lookup_failed\":\n        assert \"HTTPStatusError\" in records[0][\"error\"]\n    if expected == \"retrieved\":\n        assert records[0][\"release_notes\"] == \"Release notes\"",
+          "line_end": 64,
+          "line_start": 34,
+          "path": "tests/test_dependabot_review_core.py",
           "rank": 3,
-          "relevant": false,
-          "symbol": "review_dependabot_pull_request"
-        },
-        {
-          "content": "@pytest.mark.parametrize((\"release_status\", \"body\", \"expected\"), [\n    (200, \"Release notes\", \"retrieved\"),\n    (200, \"\", \"no_release_notes\"),\n    (404, \"\", \"no_release_notes\"),\n    (403, \"\", \"lookup_failed\"),\n])\ndef test_release_lookup_status_is_explicit_and_machine_readable(monkeypatch, release_status, body, expected):\n    registry = Mock()\n    registry.status_code = 200\n    registry.raise_for_status.return_value = None\n    registry.json.return_value = {\"info\": {\"project_urls\": {\"Source\": \"https://github.com/acme/demo\"}}}\n    release = Mock()\n    release.status_code = release_status\n    if release_status == 403:\n        response = httpx.Response(403, request=httpx.Request(\"GET\", \"https://api.github.com/example\"))\n        release.raise_for_status.side_effect = httpx.HTTPStatusError(\"forbidden\", request=response.request, response=response)\n    else:\n        release.raise_for_status.return_value = None\n    release.json.return_value = {\"body\": body}\n    client = Mock()\n    client.get.side_effect = [registry, release] if release_status != 404 else [registry, release, release]\n    monkeypatch.setattr(review.httpx, \"Client\", lambda **_kwargs: client)\n\n    records = review._release_context([{\"package\": \"demo\", \"ecosystem\": \"pypi\", \"head_version\": \"1.2.3\"}])\n\n    assert records[0][\"status\"] == expected\n    assert client.close.called\n    if expected == \"lookup_failed\":\n        assert \"HTTPStatusError\" in records[0][\"error\"]\n    if expected == \"retrieved\":\n        assert records[0][\"release_notes\"] == \"Release notes\"",
-          "line_end": 61,
-          "line_start": 31,
-          "path": "tests/test_dependabot_review.py",
-          "rank": 4,
           "relevant": false,
           "symbol": "test_release_lookup_status_is_explicit_and_machine_readable"
         },
         {
+          "content": "def _safe_scan(snapshot: Path, osv_client: httpx.AsyncClient | None) -> dict[str, Any]:\n    try:\n        return scan_module.scan_snapshot(snapshot, osv_client)\n    except Exception as exc:\n        return {\n            \"scan_status\": \"failed\", \"scan_error\": f\"{type(exc).__name__}: {exc}\",\n            \"manifests\": [], \"packages_checked\": 0, \"unresolved_packages\": [], \"findings\": [],\n        }",
+          "line_end": 38,
+          "line_start": 31,
+          "path": "vulnerability_agent/dependabot/orchestrator.py",
+          "rank": 4,
+          "relevant": false,
+          "symbol": "_safe_scan"
+        },
+        {
           "content": "async def scan_packages(\n    packages: list[dict[str, str]],\n    client: httpx.AsyncClient | None = None,\n    *,\n    max_concurrency: int = 8,\n) -> list[dict[str, Any]]:\n    \"\"\"Query OSV concurrently with a small bound, preserving package order.\n\n    OSV calls are independent, so bounded concurrency reduces scan latency\n    without creating an unbounded burst against the public API. ``gather``\n    preserves input ordering, which keeps report and branch ordering stable.\n    \"\"\"\n    if max_concurrency < 1:\n        raise ValueError(\"max_concurrency must be at least 1\")\n    semaphore = asyncio.Semaphore(max_concurrency)\n\n    async def scan_one(package: dict[str, str]) -> list[dict[str, Any]]:\n        async with semaphore:\n            findings = await query_osv(package, client)\n            return [{**vulnerability, \"package\": package} for vulnerability in findings]\n\n    groups = await asyncio.gather(*(scan_one(package) for package in packages))\n    return [finding for group in groups for finding in group]",
-          "line_end": 407,
-          "line_start": 385,
+          "line_end": 412,
+          "line_start": 390,
           "path": "osv_service.py",
           "rank": 5,
           "relevant": false,
@@ -88,9 +88,9 @@
       "expected_relevant_locations": [
         {
           "evidence_classification": "api_usage",
-          "path": "vulnerability_agent/dependabot_review.py",
+          "path": "vulnerability_agent/dependabot/release_notes.py",
           "required_text": "httpx.Client(timeout=8.0",
-          "symbol": "_release_context"
+          "symbol": "release_context"
         }
       ],
       "expected_source_evidence_classification": "api_usage",
@@ -101,57 +101,57 @@
       "precision_at_5": 0.2,
       "query": "httpx synchronous HTTP requests GitHub API release lookup status error",
       "recall_at_5": 1.0,
-      "reciprocal_rank": 1.0,
+      "reciprocal_rank": 0.2,
       "relevant_ranks": [
-        1
+        5
       ],
       "relevant_retrieved_count": 1,
       "relevant_source_evidence_exists": true,
       "retrieved": [
         {
-          "content": "def _release_context(changes: list[dict[str, Any]]) -> list[dict[str, Any]]:\n    \"\"\"Fetch bounded upstream release notes when an updated package points to GitHub.\"\"\"\n    results: list[dict[str, str]] = []\n    candidates = [item for item in changes if item.get(\"head_version\") not in {\"\", \"removed\", \"not present\"}][:5]\n    try:\n        client = httpx.Client(timeout=8.0, headers={\"Accept\": \"application/vnd.github+json\"})\n    except Exception as exc:\n        return [{\"package\": item.get(\"package\", \"unknown package\"), \"version\": item.get(\"head_version\", \"\"),\n                 \"status\": \"lookup_failed\", \"error\": f\"{type(exc).__name__}: {exc}\"[:500],\n                 \"release_notes\": \"\", \"migration_links\": []} for item in candidates]\n    try:\n        for change in candidates:\n            ecosystem, name, version = change[\"ecosystem\"], change[\"package\"], change[\"head_version\"]\n            registry_url = (\n                f\"https://pypi.org/pypi/{name}/{version}/json\" if ecosystem == \"pypi\"\n                else f\"https://registry.npmjs.org/{name}/{version}\" if ecosystem == \"npm\"\n                else \"\"\n            )\n            if not registry_url:\n                results.append({\"package\": name, \"version\": version, \"status\": \"not_applicable\",\n                                \"release_notes\": \"\", \"migration_links\": []})\n                continue\n            try:\n                registry = client.get(registry_url)\n                registry.raise_for_status()\n                data = registry.json()\n                info = data.get(\"info\", {}) if ecosystem == \"pypi\" else data\n                project_urls = info.get(\"project_urls\", {}) if ecosystem == \"pypi\" else {}\n                migration_links = []\n                if isinstance(project_urls, dict):\n                    migration_links = [\n                        {\"label\": str(label), \"url\": str(url)}\n                        for label, url in project_urls.items()\n                        if re.search(r\"change|release|migration|documentation|docs\", str(label), re.I)\n                        and str(url).startswith(\"https://\")\n                    ][:8]\n                repository_url = str(\n                    project_urls.get(\"Source\", project_urls.get(\"Repository\", project_urls.get(\"Homepage\", \"\")))\n                    if isinstance(project_urls, dict) else \"\"\n                )\n                if ecosystem == \"npm\":\n                    repository_data = data.get(\"repository\", {})\n                    repository_url = repository_data.get(\"url\", \"\") if isinstance(repository_data, dict) else str(repository_data)\n                    homepage = str(data.get(\"homepage\", \"\"))\n                    if homepage.startswith(\"https://\"):\n                        migration_links.append({\"label\": \"package homepage\", \"url\": homepage})\n                match = re.search(r\"github\\.com[:/]([^/]+)/([^/#.]+)\", str(repository_url))\n                if not match:\n                    results.append({\"package\": name, \"version\": version,\n                                    \"status\": \"source_unavailable\", \"release_notes\": \"\",\n                                    \"migration_links\": migration_links})\n                    continue\n                owner, repo = match.groups()\n                note = \"\"\n                release_found = False\n                for tag in (f\"v{version}\", version):\n                    release = client.get(f\"https://api.github.com/repos/{owner}/{repo}/releases/tags/{tag}\")\n                    if release.status_code == 404:\n                        continue\n                    release.raise_for_status()\n                    release_found = True\n                    note = str(release.json().get(\"body\", \"\"))[:3_000]\n                    break\n                results.append({\"package\": name, \"version\": version,\n                                \"status\": \"retrieved\" if note else \"no_release_notes\",\n                                \"release_found\": release_found,\n                                \"release_notes\": note, \"migration_links\": migration_links})\n            except (httpx.HTTPError, ValueError, TypeError) as exc:\n                results.append({\"package\": name, \"version\": version,\n                                \"status\": \"lookup_failed\", \"error\": f\"{type(exc).__name__}: {exc}\"[:500],\n                                \"release_notes\": \"\", \"migration_links\": []})\n    finally:\n        client.close()\n    return results",
-          "line_end": 1448,
-          "line_start": 1375,
-          "path": "vulnerability_agent/dependabot_review.py",
+          "content": "def _github_release(client: httpx.Client, owner: str, repo: str, version: str) -> tuple[str, bool]:\n    for tag in (f\"v{version}\", version):\n        release = client.get(f\"https://api.github.com/repos/{owner}/{repo}/releases/tags/{tag}\")\n        if release.status_code == 404:\n            continue\n        release.raise_for_status()\n        return str(release.json().get(\"body\", \"\"))[:3_000], True\n    return \"\", False",
+          "line_end": 88,
+          "line_start": 81,
+          "path": "vulnerability_agent/dependabot/release_notes.py",
           "rank": 1,
-          "relevant": true,
-          "symbol": "_release_context"
+          "relevant": false,
+          "symbol": "_github_release"
         },
         {
           "content": "def _raise_for_github_status(response: Any) -> None:\n    \"\"\"Raise a bounded error that preserves GitHub's useful API message.\"\"\"\n    try:\n        response.raise_for_status()\n    except httpx.HTTPStatusError as exc:\n        try:\n            payload = response.json()\n        except (TypeError, ValueError):\n            payload = getattr(response, \"text\", \"\")\n        message = payload.get(\"message\", \"\") if isinstance(payload, dict) else str(payload)\n        message = str(message).strip()[:800]\n        if message:\n            raise RuntimeError(f\"{exc}; GitHub response: {message}\") from exc\n        raise",
-          "line_end": 526,
-          "line_start": 513,
+          "line_end": 193,
+          "line_start": 180,
           "path": "vulnerability_agent/review_graph.py",
           "rank": 2,
           "relevant": false,
           "symbol": "_raise_for_github_status"
         },
         {
-          "content": "@pytest.mark.parametrize((\"release_status\", \"body\", \"expected\"), [\n    (200, \"Release notes\", \"retrieved\"),\n    (200, \"\", \"no_release_notes\"),\n    (404, \"\", \"no_release_notes\"),\n    (403, \"\", \"lookup_failed\"),\n])\ndef test_release_lookup_status_is_explicit_and_machine_readable(monkeypatch, release_status, body, expected):\n    registry = Mock()\n    registry.status_code = 200\n    registry.raise_for_status.return_value = None\n    registry.json.return_value = {\"info\": {\"project_urls\": {\"Source\": \"https://github.com/acme/demo\"}}}\n    release = Mock()\n    release.status_code = release_status\n    if release_status == 403:\n        response = httpx.Response(403, request=httpx.Request(\"GET\", \"https://api.github.com/example\"))\n        release.raise_for_status.side_effect = httpx.HTTPStatusError(\"forbidden\", request=response.request, response=response)\n    else:\n        release.raise_for_status.return_value = None\n    release.json.return_value = {\"body\": body}\n    client = Mock()\n    client.get.side_effect = [registry, release] if release_status != 404 else [registry, release, release]\n    monkeypatch.setattr(review.httpx, \"Client\", lambda **_kwargs: client)\n\n    records = review._release_context([{\"package\": \"demo\", \"ecosystem\": \"pypi\", \"head_version\": \"1.2.3\"}])\n\n    assert records[0][\"status\"] == expected\n    assert client.close.called\n    if expected == \"lookup_failed\":\n        assert \"HTTPStatusError\" in records[0][\"error\"]\n    if expected == \"retrieved\":\n        assert records[0][\"release_notes\"] == \"Release notes\"",
-          "line_end": 61,
-          "line_start": 31,
-          "path": "tests/test_dependabot_review.py",
+          "content": "@pytest.mark.parametrize((\"release_status\", \"body\", \"expected\"), [\n    (200, \"Release notes\", \"retrieved\"),\n    (200, \"\", \"no_release_notes\"),\n    (404, \"\", \"no_release_notes\"),\n    (403, \"\", \"lookup_failed\"),\n])\ndef test_release_lookup_status_is_explicit_and_machine_readable(monkeypatch, release_status, body, expected):\n    registry = Mock()\n    registry.status_code = 200\n    registry.raise_for_status.return_value = None\n    registry.json.return_value = {\"info\": {\"project_urls\": {\"Source\": \"https://github.com/acme/demo\"}}}\n    release = Mock()\n    release.status_code = release_status\n    if release_status == 403:\n        response = httpx.Response(403, request=httpx.Request(\"GET\", \"https://api.github.com/example\"))\n        release.raise_for_status.side_effect = httpx.HTTPStatusError(\"forbidden\", request=response.request, response=response)\n    else:\n        release.raise_for_status.return_value = None\n    release.json.return_value = {\"body\": body}\n    client = Mock()\n    client.get.side_effect = [registry, release] if release_status != 404 else [registry, release, release]\n    monkeypatch.setattr(release_notes.httpx, \"Client\", lambda **_kwargs: client)\n\n    records = review._release_context([{\"package\": \"demo\", \"ecosystem\": \"pypi\", \"head_version\": \"1.2.3\"}])\n\n    assert records[0][\"status\"] == expected\n    assert client.close.called\n    if expected == \"lookup_failed\":\n        assert \"HTTPStatusError\" in records[0][\"error\"]\n    if expected == \"retrieved\":\n        assert records[0][\"release_notes\"] == \"Release notes\"",
+          "line_end": 64,
+          "line_start": 34,
+          "path": "tests/test_dependabot_review_core.py",
           "rank": 3,
           "relevant": false,
           "symbol": "test_release_lookup_status_is_explicit_and_machine_readable"
         },
         {
-          "content": "def review_dependabot_pull_request(\n    repository: str | Path,\n    pull_request: str,\n    *,\n    github_client: Any | None = None,\n    osv_client: httpx.AsyncClient | None = None,\n    usage_analyzer: Callable[[Path, list[dict[str, Any]]], list[dict[str, Any]]] | None = None,\n    release_context_lookup: Callable[[list[dict[str, Any]]], list[dict[str, Any]]] | None = None,\n) -> dict[str, Any]:\n    \"\"\"Compare base and Dependabot head without changing or pushing either ref.\n\n    Tests run through the existing environment-stripped runner. GitHub API\n    credentials are used only to read PR metadata and are never passed to tests.\n    \"\"\"\n    root = Path(repository).expanduser().resolve()\n    if not root.is_dir() or not (root / \".git\").exists():\n        raise ValueError(f\"Not a Git working tree: {root}\")\n    requested_repo, number = parse_pull_request_reference(pull_request)\n    origin_repo = _github_origin(root)\n    if requested_repo and requested_repo.casefold() != origin_repo.casefold():\n        raise ValueError(f\"PR belongs to {requested_repo}, but repository origin is {origin_repo}\")\n\n    owns_client = github_client is None\n    if github_client is None:\n        headers = {\"Accept\": \"application/vnd.github+json\", \"X-GitHub-Api-Version\": \"2022-11-28\"}\n        if os.getenv(\"GITHUB_TOKEN\"):\n            headers[\"Authorization\"] = f\"Bearer {os.environ['GITHUB_TOKEN']}\"\n        github_client = httpx.Client(headers=headers, timeout=30)\n    metadata_url = f\"https://api.github.com/repos/{origin_repo}/pulls/{number}\"\n    try:\n        response = github_client.get(metadata_url)\n        response.raise_for_status()\n        metadata = response.json()\n        # A PR can retain an older base SHA after the target branch advances.\n        # Accept that only when the reported base is an ancestor of the fetched\n        # target branch. We then test a local merge of the PR head onto today's\n        # base, which represents the code GitHub would merge. Head SHA must still\n        # match exactly; unrelated or rewritten base history is rejected.\n        ref_mismatch: dict[str, str] = {}\n        base_advanced = False\n        review_base_sha = \"\"\n        for snapshot_attempt in range(3):\n            if metadata.get(\"state\") != \"open\":\n                raise ValueError(\"This Dependabot review path currently accepts open pull requests only\")\n            if str(metadata.get(\"user\", {}).get(\"login\", \"\")).casefold() != \"dependabot[bot]\":\n                raise ValueError(\"The selected pull request was not opened by dependabot[bot]\")\n            base_branch = str(metadata.get(\"base\", {}).get(\"ref\", \"\"))\n            head_branch = str(metadata.get(\"head\", {}).get(\"ref\", \"\"))\n            base_sha = str(metadata.get(\"base\", {}).get(\"sha\", \"\"))\n            head_sha = str(metadata.get(\"head\", {}).get(\"sha\", \"\"))\n            if not all((base_branch, head_branch, base_sha, head_sha)):\n                raise ValueError(\"GitHub did not return complete base/head branch metadata\")\n\n            base_ref = f\"refs/agent-review/{number}/base\"\n            head_ref = f\"refs/agent-review/{number}/head\"\n            _git(root, \"fetch\", \"--no-tags\", \"origin\",\n                 f\"+refs/heads/{base_branch}:{base_ref}\",\n                 f\"+refs/pull/{number}/head:{head_ref}\")\n            fetched_base = _git(root, \"rev-parse\", base_ref)\n            fetched_head = _git(root, \"rev-parse\", head_ref)\n            if fetched_head == head_sha:\n                if fetched_base == base_sha:\n                    review_base_sha = base_sha\n                    break\n                # This is a safe forward movement only when the PR's recorded\n                # base commit is still in the current target branch history.\n                merge_base = _git(root, \"merge-base\", base_sha, fetched_base)\n                if merge_base == base_sha:\n                    review_base_sha = fetched_base\n                    base_advanced = True\n                    break\n\n            ref_mismatch = {\n                \"expected_base_sha\": base_sha,\n                \"fetched_base_sha\": fetched_base,\n                \"expected_head_sha\": head_sha,\n                \"fetched_head_sha\": fetched_head,\n            }\n            for ref in (base_ref, head_ref):\n                subprocess.run([\"git\", \"update-ref\", \"-d\", ref], cwd=root, capture_output=True, text=True, check=False)\n            if snapshot_attempt < 2:\n                response = github_client.get(metadata_url)\n                response.raise_for_status()\n                metadata = response.json()\n        else:\n            raise RuntimeError(\n                \"GitHub PR refs did not stabilize after 3 attempts; refusing to review a mismatched snapshot. \"\n                f\"Last comparison: {ref_mismatch}\"\n            )\n",
-          "line_end": 1637,
-          "line_start": 1548,
-          "path": "vulnerability_agent/dependabot_review.py",
+          "content": "def _github_client() -> httpx.Client:\n    headers = {\"Accept\": \"application/vnd.github+json\", \"X-GitHub-Api-Version\": \"2022-11-28\"}\n    if os.getenv(\"GITHUB_TOKEN\"):\n        headers[\"Authorization\"] = f\"Bearer {os.environ['GITHUB_TOKEN']}\"\n    return httpx.Client(headers=headers, timeout=30)",
+          "line_end": 28,
+          "line_start": 24,
+          "path": "vulnerability_agent/dependabot/orchestrator.py",
           "rank": 4,
           "relevant": false,
-          "symbol": "review_dependabot_pull_request"
+          "symbol": "_github_client"
         },
         {
-          "content": "def _github_client(client: Any | None) -> tuple[Any, bool]:\n    if client is not None:\n        return client, False\n    token = os.getenv(\"GITHUB_TOKEN\", \"\")\n    if not token:\n        raise RuntimeError(\"GITHUB_TOKEN is required to post a review comment\")\n    return httpx.Client(\n        headers={\"Authorization\": f\"Bearer {token}\", \"Accept\": \"application/vnd.github+json\",\n                 \"X-GitHub-Api-Version\": \"2022-11-28\"}, timeout=30,\n    ), True",
-          "line_end": 510,
-          "line_start": 501,
-          "path": "vulnerability_agent/review_graph.py",
+          "content": "def release_context(changes: list[dict[str, Any]]) -> list[dict[str, Any]]:\n    \"\"\"Fetch bounded upstream release notes when an updated package points to GitHub.\"\"\"\n    results: list[dict[str, Any]] = []\n    candidates = [item for item in changes if item.get(\"head_version\") not in {\"\", \"removed\", \"not present\"}][:5]\n    try:\n        client = httpx.Client(timeout=8.0, headers={\"Accept\": \"application/vnd.github+json\"})\n    except Exception as exc:\n        return [{\"package\": item.get(\"package\", \"unknown package\"), \"version\": item.get(\"head_version\", \"\"),\n                 \"status\": \"lookup_failed\", \"error\": f\"{type(exc).__name__}: {exc}\"[:500],\n                 \"release_notes\": \"\", \"migration_links\": []} for item in candidates]\n    try:\n        for change in candidates:\n            results.append(_release_for_change(client, change))\n    finally:\n        client.close()\n    return results",
+          "line_end": 25,
+          "line_start": 10,
+          "path": "vulnerability_agent/dependabot/release_notes.py",
           "rank": 5,
-          "relevant": false,
-          "symbol": "_github_client"
+          "relevant": true,
+          "symbol": "release_context"
         }
       ],
       "returned_count": 5,
@@ -205,8 +205,8 @@
         },
         {
           "content": "def poetry_constraint_allows(constraint: Any, version: str) -> bool:\n    \"\"\"Check common Poetry constraint forms against a resolved lock version.\"\"\"\n    if isinstance(constraint, dict):\n        constraint = constraint.get(\"version\", \"\")\n    text = str(constraint or \"*\").strip()\n    if text in {\"\", \"*\"}:\n        return True\n    try:\n        resolved = Version(version)\n    except InvalidVersion:\n        return False\n    if text.startswith(\"^\"):\n        try:\n            lower = Version(text[1:])\n        except InvalidVersion:\n            return False\n        parts = list(lower.release) + [0, 0, 0]\n        index = next((i for i, part in enumerate(parts[:3]) if part), 2)\n        upper_parts = parts[:index + 1]\n        upper_parts[-1] += 1\n        upper = Version(\".\".join(map(str, upper_parts)))\n        return lower <= resolved < upper\n    if text.startswith(\"~\") and not text.startswith(\"~=\"):\n        try:\n            lower = Version(text[1:])\n            parts = list(lower.release) + [0, 0, 0]\n            upper = Version(f\"{parts[0]}.{parts[1] + 1}.0\")\n            return lower <= resolved < upper\n        except InvalidVersion:\n            return False\n    pep440 = text.replace(\",\", \",\")\n    if re.fullmatch(r\"[0-9][A-Za-z0-9.+!_-]*\", pep440):\n        pep440 = f\"=={pep440}\"\n    try:\n        return resolved in SpecifierSet(pep440)\n    except InvalidSpecifier:\n        return False",
-          "line_end": 238,
-          "line_start": 202,
+          "line_end": 243,
+          "line_start": 207,
           "path": "osv_service.py",
           "rank": 2,
           "relevant": true,
@@ -214,8 +214,8 @@
         },
         {
           "content": "def poetry_declared_constraint(content: str, package_name: str) -> Any | None:\n    \"\"\"Find a package constraint in Poetry or PEP 621 project dependency tables.\"\"\"\n    try:\n        import tomllib\n    except ImportError:  # Python 3.10\n        import tomli as tomllib  # type: ignore[no-redef]\n    try:\n        data = tomllib.loads(content)\n    except (ValueError, TypeError) as exc:\n        raise ValueError(f\"Cannot parse pyproject.toml for dependency verification: {exc}\") from exc\n    wanted = _normalized_package_name(package_name, \"pypi\")\n    tool = data.get(\"tool\", {}).get(\"poetry\", {})\n    tables = [tool.get(\"dependencies\", {})]\n    tables.extend(\n        group.get(\"dependencies\", {})\n        for group in (tool.get(\"group\", {}) or {}).values()\n        if isinstance(group, dict)\n    )\n    for dependencies in tables:\n        for name, constraint in (dependencies or {}).items():\n            if _normalized_package_name(str(name), \"pypi\") == wanted:\n                return constraint\n    project = data.get(\"project\", {})\n    requirements = list(project.get(\"dependencies\", []) or [])\n    for optional in (project.get(\"optional-dependencies\", {}) or {}).values():\n        requirements.extend(optional or [])\n    for raw_requirement in requirements:\n        try:\n            requirement = Requirement(str(raw_requirement))\n        except InvalidRequirement:\n            continue\n        if _normalized_package_name(requirement.name, \"pypi\") == wanted:\n            return str(requirement.specifier) or \"*\"\n    return None",
-          "line_end": 274,
-          "line_start": 241,
+          "line_end": 279,
+          "line_start": 246,
           "path": "osv_service.py",
           "rank": 3,
           "relevant": false,
@@ -231,13 +231,13 @@
           "symbol": "test_package_evidence_detects_submodule_and_from_import_aliases"
         },
         {
-          "content": "def _scan(repository: Path, client: httpx.AsyncClient | None) -> dict[str, Any]:\n    packages, manifests = _read_packages(repository)\n    resolved = [package for package in packages if package.get(\"version\")]\n    unresolved = [package[\"name\"] for package in packages if not package.get(\"version\")]\n    scan_error = \"\"\n    try:\n        findings = run_async(scan_packages(resolved, client)) if resolved else []\n    except Exception as exc:\n        # Keep the resolved inventory so changed packages remain identifiable,\n        # while making the failed advisory lookup explicit to classification.\n        findings = []\n        scan_error = f\"{type(exc).__name__}: {exc}\"\n    roots, edges = _dependency_index(repository)\n    manifest_map = _package_manifest_map(repository)\n    records: list[dict[str, Any]] = []\n    seen: set[tuple[str, str, str]] = set()\n    for item in findings:\n        package = item.get(\"package\", {})\n        ecosystem = str(package.get(\"ecosystem\", \"\"))\n        name = str(package.get(\"name\", \"\"))\n        normalized_name = re.sub(r\"[-_.]+\", \"-\", name.casefold()) if ecosystem.casefold() == \"pypi\" else name.casefold()\n        advisory_id = str(item.get(\"id\", \"unknown\"))\n        identity = (ecosystem.casefold(), normalized_name, advisory_id.casefold())\n        if identity in seen:\n            continue\n        seen.add(identity)\n        dependency_key = (ecosystem.casefold(), normalized_name)\n        paths = _dependency_paths(roots, edges, dependency_key)\n        relationship = \"direct\" if dependency_key in roots else (\"transitive\" if paths else \"unknown\")\n        matching_affected = [\n            affected for affected in item.get(\"affected\", [])\n            if str(affected.get(\"package\", {}).get(\"ecosystem\", \"\")).casefold() == ecosystem.casefold()\n            and (re.sub(r\"[-_.]+\", \"-\", str(affected.get(\"package\", {}).get(\"name\", \"\")).casefold())\n                 if ecosystem.casefold() == \"pypi\" else str(affected.get(\"package\", {}).get(\"name\", \"\")).casefold()) == normalized_name\n        ]\n        affected_ranges = [\n            {key: value for key, value in version_range.items() if key in {\"type\", \"repo\", \"events\"}}\n            for affected in matching_affected for version_range in affected.get(\"ranges\", [])\n            if isinstance(version_range, dict)\n        ]\n        affected_versions = sorted({str(version) for affected in matching_affected for version in affected.get(\"versions\", [])})\n        fixed_versions = sorted({str(event[\"fixed\"]) for version_range in affected_ranges\n                                 for event in version_range.get(\"events\", [])\n                                 if str(version_range.get(\"type\", \"\")).upper() in {\"ECOSYSTEM\", \"SEMVER\"}\n                                 and isinstance(event, dict) and event.get(\"fixed\")})\n        severity = [\n            {key: str(value) for key, value in entry.items() if key in {\"type\", \"score\"} and value is not None}\n            for entry in item.get(\"severity\", []) if isinstance(entry, dict)\n        ]\n        records.append({\n            \"finding_identity\": f\"{ecosystem.casefold()}:{normalized_name}:{advisory_id.casefold()}\",\n            \"id\": advisory_id,\n            \"package\": name,\n            \"ecosystem\": ecosystem,\n            \"version\": str(package.get(\"version\", \"\")),\n            \"installed_version\": str(package.get(\"version\", \"\")) or None,\n            \"summary\": str(item.get(\"summary\", \"\")),\n            \"severity\": severity,\n            \"severity_status\": \"available\" if severity else \"unavailable\",\n            \"affected_ranges\": affected_ranges,\n            \"affected_versions\": affected_versions,\n            \"affected_range_status\": \"available\" if affected_ranges or affected_versions else \"unavailable\",\n            \"version_assessment\": assess_version_affected_by_advisory(item, str(package.get(\"version\", \"\"))),\n            \"fixed_versions\": fixed_versions,\n            \"fixed_version_status\": \"available\" if fixed_versions else \"unavailable\",\n            \"manifest_files\": manifest_map.get(dependency_key, []),\n            \"relationship\": relationship,\n            \"dependency_paths\": paths,\n            \"dependency_path_status\": \"available\" if paths else \"unavailable\",\n            \"aliases\": sorted({str(alias) for alias in item.get(\"aliases\", []) if alias})[:20],\n            \"references\": [\n                {key: str(ref[key]) for key in (\"type\", \"url\") if ref.get(key)}\n                for ref in item.get(\"references\", [])[:10] if isinstance(ref, dict)\n            ],\n        })\n    return {\n        \"scan_status\": \"failed\" if scan_error else \"complete\",\n        **({\"scan_error\": scan_error} if scan_error else {}),\n        \"manifests\": manifests,\n        \"packages_checked\": len(resolved),\n        \"unresolved_packages\": unresolved,\n        \"findings\": records,\n        \"resolved_packages\": resolved,\n    }",
-          "line_end": 201,
-          "line_start": 118,
-          "path": "vulnerability_agent/dependabot_review.py",
+          "content": "def _version_recommendation(\n    classification: str,\n    counts: dict[str, int],\n    version_status: dict[str, int],\n    delta: dict[str, Any],\n    compact_delta_groups: dict[str, list[dict[str, Any]]],\n) -> str:\n    packages = sorted({str(item.get(\"package\", \"unknown\")) for item in delta.get(classification, [])})\n    package_names = f\" for {', '.join(packages[:4])}\" if packages else \"\"\n    context = package_record_context(compact_delta_groups, classification)\n    if version_status.get(\"affected\"):\n        return (\n            f\"Potential security concern: {version_status['affected']} {classification} advisory record(s) \"\n            f\"have a deterministic affected installed version{package_names} ({context}). \"\n            \"Review the affected range and fixed-version guidance.\"\n        )\n    if version_status.get(\"unknown\"):\n        if classification == \"introduced\":\n            return (\n                f\"Review recommended: {counts['introduced']} advisory record(s) are new{package_names}, \"\n                \"but installed-version impact is unknown. Check the preserved OSV range evidence; \"\n                \"do not treat unknown as not affected.\"\n            )\n        return (\n            f\"Review recommended: {counts['remaining']} advisory record(s) remain{package_names}, \"\n            \"but installed-version impact is unknown. Inspect the range evidence; \"\n            \"unknown is not evidence that the installed version is safe.\"\n        )\n    if classification == \"introduced\":\n        return (\n            f\"OSV returned {counts['introduced']} new advisory record(s){package_names}, but deterministic range \"\n            \"assessment says the installed versions are not affected. Review the advisory evidence and dependency \"\n            \"change; this does not establish application compatibility.\"\n        )\n    return (\n        f\"OSV records remain{package_names}, but deterministic range assessment says the installed versions are \"\n        \"not affected. Review any advisory data discrepancy and application compatibility.\"\n    )",
+          "line_end": 191,
+          "line_start": 154,
+          "path": "vulnerability_agent/dependabot/report_summary.py",
           "rank": 5,
           "relevant": false,
-          "symbol": "_scan"
+          "symbol": "_version_recommendation"
         }
       ],
       "returned_count": 5,
@@ -281,22 +281,22 @@
       "relevant_source_evidence_exists": true,
       "retrieved": [
         {
-          "content": "def poetry_constraint_allows(constraint: Any, version: str) -> bool:\n    \"\"\"Check common Poetry constraint forms against a resolved lock version.\"\"\"\n    if isinstance(constraint, dict):\n        constraint = constraint.get(\"version\", \"\")\n    text = str(constraint or \"*\").strip()\n    if text in {\"\", \"*\"}:\n        return True\n    try:\n        resolved = Version(version)\n    except InvalidVersion:\n        return False\n    if text.startswith(\"^\"):\n        try:\n            lower = Version(text[1:])\n        except InvalidVersion:\n            return False\n        parts = list(lower.release) + [0, 0, 0]\n        index = next((i for i, part in enumerate(parts[:3]) if part), 2)\n        upper_parts = parts[:index + 1]\n        upper_parts[-1] += 1\n        upper = Version(\".\".join(map(str, upper_parts)))\n        return lower <= resolved < upper\n    if text.startswith(\"~\") and not text.startswith(\"~=\"):\n        try:\n            lower = Version(text[1:])\n            parts = list(lower.release) + [0, 0, 0]\n            upper = Version(f\"{parts[0]}.{parts[1] + 1}.0\")\n            return lower <= resolved < upper\n        except InvalidVersion:\n            return False\n    pep440 = text.replace(\",\", \",\")\n    if re.fullmatch(r\"[0-9][A-Za-z0-9.+!_-]*\", pep440):\n        pep440 = f\"=={pep440}\"\n    try:\n        return resolved in SpecifierSet(pep440)\n    except InvalidSpecifier:\n        return False",
-          "line_end": 238,
-          "line_start": 202,
+          "content": "def poetry_declared_constraint(content: str, package_name: str) -> Any | None:\n    \"\"\"Find a package constraint in Poetry or PEP 621 project dependency tables.\"\"\"\n    try:\n        import tomllib\n    except ImportError:  # Python 3.10\n        import tomli as tomllib  # type: ignore[no-redef]\n    try:\n        data = tomllib.loads(content)\n    except (ValueError, TypeError) as exc:\n        raise ValueError(f\"Cannot parse pyproject.toml for dependency verification: {exc}\") from exc\n    wanted = _normalized_package_name(package_name, \"pypi\")\n    tool = data.get(\"tool\", {}).get(\"poetry\", {})\n    tables = [tool.get(\"dependencies\", {})]\n    tables.extend(\n        group.get(\"dependencies\", {})\n        for group in (tool.get(\"group\", {}) or {}).values()\n        if isinstance(group, dict)\n    )\n    for dependencies in tables:\n        for name, constraint in (dependencies or {}).items():\n            if _normalized_package_name(str(name), \"pypi\") == wanted:\n                return constraint\n    project = data.get(\"project\", {})\n    requirements = list(project.get(\"dependencies\", []) or [])\n    for optional in (project.get(\"optional-dependencies\", {}) or {}).values():\n        requirements.extend(optional or [])\n    for raw_requirement in requirements:\n        try:\n            requirement = Requirement(str(raw_requirement))\n        except InvalidRequirement:\n            continue\n        if _normalized_package_name(requirement.name, \"pypi\") == wanted:\n            return str(requirement.specifier) or \"*\"\n    return None",
+          "line_end": 279,
+          "line_start": 246,
           "path": "osv_service.py",
           "rank": 1,
           "relevant": true,
-          "symbol": "poetry_constraint_allows"
+          "symbol": "poetry_declared_constraint"
         },
         {
-          "content": "def poetry_declared_constraint(content: str, package_name: str) -> Any | None:\n    \"\"\"Find a package constraint in Poetry or PEP 621 project dependency tables.\"\"\"\n    try:\n        import tomllib\n    except ImportError:  # Python 3.10\n        import tomli as tomllib  # type: ignore[no-redef]\n    try:\n        data = tomllib.loads(content)\n    except (ValueError, TypeError) as exc:\n        raise ValueError(f\"Cannot parse pyproject.toml for dependency verification: {exc}\") from exc\n    wanted = _normalized_package_name(package_name, \"pypi\")\n    tool = data.get(\"tool\", {}).get(\"poetry\", {})\n    tables = [tool.get(\"dependencies\", {})]\n    tables.extend(\n        group.get(\"dependencies\", {})\n        for group in (tool.get(\"group\", {}) or {}).values()\n        if isinstance(group, dict)\n    )\n    for dependencies in tables:\n        for name, constraint in (dependencies or {}).items():\n            if _normalized_package_name(str(name), \"pypi\") == wanted:\n                return constraint\n    project = data.get(\"project\", {})\n    requirements = list(project.get(\"dependencies\", []) or [])\n    for optional in (project.get(\"optional-dependencies\", {}) or {}).values():\n        requirements.extend(optional or [])\n    for raw_requirement in requirements:\n        try:\n            requirement = Requirement(str(raw_requirement))\n        except InvalidRequirement:\n            continue\n        if _normalized_package_name(requirement.name, \"pypi\") == wanted:\n            return str(requirement.specifier) or \"*\"\n    return None",
-          "line_end": 274,
-          "line_start": 241,
+          "content": "def poetry_constraint_allows(constraint: Any, version: str) -> bool:\n    \"\"\"Check common Poetry constraint forms against a resolved lock version.\"\"\"\n    if isinstance(constraint, dict):\n        constraint = constraint.get(\"version\", \"\")\n    text = str(constraint or \"*\").strip()\n    if text in {\"\", \"*\"}:\n        return True\n    try:\n        resolved = Version(version)\n    except InvalidVersion:\n        return False\n    if text.startswith(\"^\"):\n        try:\n            lower = Version(text[1:])\n        except InvalidVersion:\n            return False\n        parts = list(lower.release) + [0, 0, 0]\n        index = next((i for i, part in enumerate(parts[:3]) if part), 2)\n        upper_parts = parts[:index + 1]\n        upper_parts[-1] += 1\n        upper = Version(\".\".join(map(str, upper_parts)))\n        return lower <= resolved < upper\n    if text.startswith(\"~\") and not text.startswith(\"~=\"):\n        try:\n            lower = Version(text[1:])\n            parts = list(lower.release) + [0, 0, 0]\n            upper = Version(f\"{parts[0]}.{parts[1] + 1}.0\")\n            return lower <= resolved < upper\n        except InvalidVersion:\n            return False\n    pep440 = text.replace(\",\", \",\")\n    if re.fullmatch(r\"[0-9][A-Za-z0-9.+!_-]*\", pep440):\n        pep440 = f\"=={pep440}\"\n    try:\n        return resolved in SpecifierSet(pep440)\n    except InvalidSpecifier:\n        return False",
+          "line_end": 243,
+          "line_start": 207,
           "path": "osv_service.py",
           "rank": 2,
           "relevant": true,
-          "symbol": "poetry_declared_constraint"
+          "symbol": "poetry_constraint_allows"
         },
         {
           "content": "def _version_key(value: str, ecosystem: str) -> Any:\n    \"\"\"Parse versions conservatively for the ecosystems supported by OSV.\"\"\"\n    if ecosystem.casefold() == \"npm\":\n        return _semver_key(value, allow_v=True)\n    try:\n        return Version(value.lstrip(\"v\"))\n    except InvalidVersion as exc:\n        raise ValueError(f\"Unsupported PyPI version: {value!r}\") from exc",
@@ -308,13 +308,13 @@
           "symbol": "_version_key"
         },
         {
-          "content": "            compatible, incompatible = [], []\n            for candidate in fixed:\n                evaluations = [poetry_constraint_allows(entry.get(\"constraint\"), str(candidate))\n                               for entry in constraints]\n                if evaluations and all(evaluations) and constraints_status == \"complete\":\n                    compatible.append(str(candidate))\n                elif any(evaluation is False for evaluation in evaluations):\n                    incompatible.append(str(candidate))\n            if incompatible:\n                parent_text = \", \".join(sorted({\n                    f\"{entry.get('parent', 'parent package')} ({entry.get('constraint', 'constraint unavailable')})\"\n                    for entry in constraints\n                    if any(not poetry_constraint_allows(entry.get(\"constraint\"), value) for value in incompatible)\n                }))\n                compatibility_text = (\n                    f\"; fixed candidate(s) {', '.join(incompatible)} conflict with recorded constraint(s) from {parent_text}; \"\n                    \"a parent or coordinated dependency upgrade is needed; no compatible coordinated version set is established by the available metadata; \"\n                    \"do not upgrade this package in isolation\"\n                )\n            elif compatible:\n                compatibility_text = f\"; candidate {', '.join(compatible)} satisfies recorded dependency constraints\"\n            else:\n                compatibility_text = \"; fixed-version compatibility with parent constraints is unknown, do not recommend an isolated upgrade\"\n            details.append(\n                f\"OSV finding for installed {package} {version} ({advisory}): assessment {affected_status} \"\n                f\"({assessment.get('confidence', 'unknown')}); {range_text}; fixed version {fixed_status} ({fixed_text}){compatibility_text}\"\n            )\n            if len(details) == 2:\n                break\n        return \"; \".join(details)\n\n    def application_evidence_note() -> str:\n        notes = []\n        for item in source_usage[:4]:\n            package = item[\"package\"]\n            locations = item.get(\"locations\", [])\n            production_usage = sorted({str(location.get(\"evidence_classification\")) for location in locations\n                                       if location.get(\"area\") == \"application\"\n                                       and location.get(\"evidence_classification\") in {\"direct_import\", \"api_usage\"}})\n            test_usage = sorted({str(location.get(\"evidence_classification\")) for location in locations\n                                 if location.get(\"area\") == \"tests\"})\n            usage = \", \".join(production_usage) if production_usage else \"no production usage established\"\n            if test_usage:\n                usage += \"; test evidence \" + \", \".join(test_usage)\n            reachability = \", \".join(sorted({\n                str(record.get(\"status\", \"unknown\")) for record in item.get(\"vulnerability_reachability\", [])\n            })) or \"unknown\"\n            relationship = item.get(\"dependency_relationship\", item.get(\"relationship\", \"unknown\"))\n            notes.append(f\"{package}: dependency graph {relationship}; production source evidence {usage}, reachability {reachability}\")\n        return \"; \".join(notes)\n\n    if not tests_both_pass:\n        recommendation = \"Validation incomplete or failing; investigate the test results before merging.\"\n    elif counts[\"introduced\"]:\n        introduced_packages = sorted({str(item.get(\"package\", \"unknown\")) for item in delta.get(\"introduced\", [])})\n        version_status = version_assessment_counts[\"introduced\"]\n        package_names = f\" for {', '.join(introduced_packages[:4])}\" if introduced_packages else \"\"\n        if version_status[\"affected\"]:\n            recommendation = (\n                f\"Potential security concern: {version_status['affected']} introduced advisory record(s) have a deterministic affected installed version\"\n                f\"{package_names} ({package_record_context('introduced')}). Review the affected range and fixed-version guidance.\"\n            )\n        elif version_status[\"unknown\"]:\n            recommendation = (\n                f\"Review recommended: {counts['introduced']} advisory record(s) are new{package_names}, but installed-version impact is unknown. \"\n                \"Check the preserved OSV range evidence; do not treat unknown as not affected.\"\n            )\n        else:\n            recommendation = (\n                f\"OSV returned {counts['introduced']} new advisory record(s){package_names}, but deterministic range assessment says the installed versions are not affected. \"\n                \"Review the advisory evidence and dependency change; this does not establish application compatibility.\"\n            )\n    elif counts[\"remaining\"]:\n        remaining_packages = sorted({str(item.get(\"package\", \"unknown\")) for item in delta.get(\"remaining\", [])})\n        version_status = version_assessment_counts[\"remaining\"]\n        package_names = f\" for {', '.join(remaining_packages[:4])}\" if remaining_packages else \"\"\n        if version_status[\"affected\"]:\n            recommendation = (\n                f\"Potential security concern: {version_status['affected']} remaining advisory record(s) have a deterministic affected installed version\"\n                f\"{package_names} ({package_record_context('remaining')}). Review the affected range and fixed-version guidance.\"\n            )\n        elif version_status[\"unknown\"]:\n            recommendation = (\n                f\"Review recommended: {counts['remaining']} advisory record(s) remain{package_names}, but installed-version impact is unknown. \"\n                \"Inspect the range evidence; unknown is not evidence that the installed version is safe.\"\n            )\n        else:\n            recommendation = (\n                f\"OSV records remain{package_names}, but deterministic range assessment says the installed versions are not affected. \"\n                \"Review any advisory data discrepancy and application compatibility.\"",
-          "line_end": 1196,
-          "line_start": 1107,
-          "path": "vulnerability_agent/dependabot_review.py",
+          "content": "def _compatibility_text(\n    fixed: list[Any], constraints: list[dict[str, Any]], constraints_status: str,\n) -> str:\n    compatible, incompatible = [], []\n    for candidate in fixed:\n        evaluations = [poetry_constraint_allows(entry.get(\"constraint\"), str(candidate)) for entry in constraints]\n        if evaluations and all(evaluations) and constraints_status == \"complete\":\n            compatible.append(str(candidate))\n        elif any(evaluation is False for evaluation in evaluations):\n            incompatible.append(str(candidate))\n    if incompatible:\n        parent_text = \", \".join(sorted({\n            f\"{entry.get('parent', 'parent package')} ({entry.get('constraint', 'constraint unavailable')})\"\n            for entry in constraints\n            if any(not poetry_constraint_allows(entry.get(\"constraint\"), value) for value in incompatible)\n        }))\n        return (\n            f\"; fixed candidate(s) {', '.join(incompatible)} conflict with recorded constraint(s) from {parent_text}; \"\n            \"a parent or coordinated dependency upgrade is needed; no compatible coordinated version set is established by the available metadata; \"\n            \"do not upgrade this package in isolation\"\n        )\n    if compatible:\n        return f\"; candidate {', '.join(compatible)} satisfies recorded dependency constraints\"\n    return \"; fixed-version compatibility with parent constraints is unknown, do not recommend an isolated upgrade\"",
+          "line_end": 72,
+          "line_start": 49,
+          "path": "vulnerability_agent/dependabot/report_summary.py",
           "rank": 4,
           "relevant": false,
-          "symbol": "_compact_review_report"
+          "symbol": "_compatibility_text"
         },
         {
           "content": "def test_poetry_constraints_used_by_review():\n    assert poetry_constraint_allows(\"^2.0.0\", \"2.4.1\")\n    assert not poetry_constraint_allows(\"^2.0.0\", \"3.0.0\")",
@@ -339,139 +339,139 @@
       "expected_relevant_locations": [
         {
           "evidence_classification": "direct_import",
-          "path": "vulnerability_agent/report_validation.py",
+          "path": "vulnerability_agent/validation/models.py",
           "required_text": "class _ReportModel(BaseModel)",
           "symbol": "_ReportModel"
         },
         {
           "evidence_classification": "api_usage",
-          "path": "vulnerability_agent/report_validation.py",
+          "path": "vulnerability_agent/validation/models.py",
           "required_text": "class DependencyRecord(_ReportModel)",
           "symbol": "DependencyRecord"
         },
         {
           "evidence_classification": "api_usage",
-          "path": "vulnerability_agent/report_validation.py",
+          "path": "vulnerability_agent/validation/models.py",
           "required_text": "class DependencyUpdate(_ReportModel)",
           "symbol": "DependencyUpdate"
         },
         {
           "evidence_classification": "api_usage",
-          "path": "vulnerability_agent/report_validation.py",
+          "path": "vulnerability_agent/validation/models.py",
           "required_text": "class TestResult(_ReportModel)",
           "symbol": "TestResult"
         },
         {
           "evidence_classification": "api_usage",
-          "path": "vulnerability_agent/report_validation.py",
+          "path": "vulnerability_agent/validation/models.py",
           "required_text": "class ReportCounts(_ReportModel)",
           "symbol": "ReportCounts"
         },
         {
           "evidence_classification": "api_usage",
-          "path": "vulnerability_agent/report_validation.py",
+          "path": "vulnerability_agent/validation/models.py",
           "required_text": "class AffectedVersionAssessment(_ReportModel)",
           "symbol": "AffectedVersionAssessment"
         },
         {
           "evidence_classification": "api_usage",
-          "path": "vulnerability_agent/report_validation.py",
+          "path": "vulnerability_agent/validation/models.py",
           "required_text": "class AdvisoryRecord(_ReportModel)",
           "symbol": "AdvisoryRecord"
         },
         {
           "evidence_classification": "api_usage",
-          "path": "vulnerability_agent/report_validation.py",
+          "path": "vulnerability_agent/validation/models.py",
           "required_text": "class FindingGroup(_ReportModel)",
           "symbol": "FindingGroup"
         },
         {
           "evidence_classification": "api_usage",
-          "path": "vulnerability_agent/report_validation.py",
+          "path": "vulnerability_agent/validation/models.py",
           "required_text": "class SecurityDelta(_ReportModel)",
           "symbol": "SecurityDelta"
         },
         {
           "evidence_classification": "api_usage",
-          "path": "vulnerability_agent/report_validation.py",
+          "path": "vulnerability_agent/validation/models.py",
           "required_text": "class ScanSummary(_ReportModel)",
           "symbol": "ScanSummary"
         },
         {
           "evidence_classification": "api_usage",
-          "path": "vulnerability_agent/report_validation.py",
+          "path": "vulnerability_agent/validation/models.py",
           "required_text": "class ReleaseContextRecord(_ReportModel)",
           "symbol": "ReleaseContextRecord"
         },
         {
           "evidence_classification": "api_usage",
-          "path": "vulnerability_agent/report_validation.py",
+          "path": "vulnerability_agent/validation/models.py",
           "required_text": "class DependencyAnalysis(_ReportModel)",
           "symbol": "DependencyAnalysis"
         },
         {
           "evidence_classification": "api_usage",
-          "path": "vulnerability_agent/report_validation.py",
+          "path": "vulnerability_agent/validation/models.py",
           "required_text": "class SourceLocation(_ReportModel)",
           "symbol": "SourceLocation"
         },
         {
           "evidence_classification": "api_usage",
-          "path": "vulnerability_agent/report_validation.py",
+          "path": "vulnerability_agent/validation/models.py",
           "required_text": "class VulnerabilityReachability(_ReportModel)",
           "symbol": "VulnerabilityReachability"
         },
         {
           "evidence_classification": "api_usage",
-          "path": "vulnerability_agent/report_validation.py",
+          "path": "vulnerability_agent/validation/models.py",
           "required_text": "class SourceUsageRecord(_ReportModel)",
           "symbol": "SourceUsageRecord"
         },
         {
           "evidence_classification": "api_usage",
-          "path": "vulnerability_agent/report_validation.py",
+          "path": "vulnerability_agent/validation/models.py",
           "required_text": "class SourceUsageSummary(_ReportModel)",
           "symbol": "SourceUsageSummary"
         },
         {
           "evidence_classification": "api_usage",
-          "path": "vulnerability_agent/report_validation.py",
+          "path": "vulnerability_agent/validation/models.py",
           "required_text": "class TestComparison(_ReportModel)",
           "symbol": "TestComparison"
         },
         {
           "evidence_classification": "api_usage",
-          "path": "vulnerability_agent/report_validation.py",
+          "path": "vulnerability_agent/validation/models.py",
           "required_text": "class ValidationRecord(_ReportModel)",
           "symbol": "ValidationRecord"
         },
         {
           "evidence_classification": "api_usage",
-          "path": "vulnerability_agent/report_validation.py",
+          "path": "vulnerability_agent/validation/models.py",
           "required_text": "class TestSummary(_ReportModel)",
           "symbol": "TestSummary"
         },
         {
           "evidence_classification": "api_usage",
-          "path": "vulnerability_agent/report_validation.py",
+          "path": "vulnerability_agent/validation/models.py",
           "required_text": "class ReportSummary(_ReportModel)",
           "symbol": "ReportSummary"
         },
         {
           "evidence_classification": "api_usage",
-          "path": "vulnerability_agent/report_validation.py",
+          "path": "vulnerability_agent/validation/models.py",
           "required_text": "class EvidenceReportV6(_ReportModel)",
           "symbol": "EvidenceReportV6"
         },
         {
           "evidence_classification": "api_usage",
-          "path": "vulnerability_agent/report_validation.py",
+          "path": "vulnerability_agent/validation/validator.py",
           "required_text": "EvidenceReportV6.model_validate(normalized)",
           "symbol": "validate_evidence_report"
         },
         {
           "evidence_classification": "api_usage",
-          "path": "vulnerability_agent/report_validation.py",
+          "path": "vulnerability_agent/validation/validator.py",
           "required_text": "return EvidenceReportV6.model_json_schema()",
           "symbol": "evidence_report_json_schema"
         }
@@ -497,48 +497,48 @@
       "retrieved": [
         {
           "content": "class _ReportModel(BaseModel):\n    model_config = ConfigDict(extra=\"allow\", strict=True)",
-          "line_end": 11,
-          "line_start": 10,
-          "path": "vulnerability_agent/report_validation.py",
+          "line_end": 10,
+          "line_start": 9,
+          "path": "vulnerability_agent/validation/models.py",
           "rank": 1,
           "relevant": true,
           "symbol": "_ReportModel"
         },
         {
           "content": "class EvidenceReportV6(_ReportModel):\n    schema_version: Literal[6]\n    mode: Literal[\"dependabot_pr_review\"]\n    status: Literal[\"review_complete\", \"analysis_failed\", \"comment_failed\"]\n    summary: ReportSummary\n    repository_full_name: str\n    pull_request: dict[str, Any]\n    dependency_changes: list[DependencyRecord]\n    files_changed: list[dict[str, Any]]\n    files_truncated: bool\n    tests: dict[Literal[\"base\", \"pr\"], TestResult]\n    test_comparison: TestComparison\n    osv_scans: dict[Literal[\"base\", \"pr\"], ScanSummary]\n    security_delta: SecurityDelta\n    source_usage: list[SourceUsageRecord]\n    release_context: list[ReleaseContextRecord] = Field(default_factory=list)\n    validation: ValidationRecord\n\n    @model_validator(mode=\"after\")",
-          "line_end": 291,
-          "line_start": 273,
-          "path": "vulnerability_agent/report_validation.py",
+          "line_end": 294,
+          "line_start": 276,
+          "path": "vulnerability_agent/validation/models.py",
           "rank": 2,
           "relevant": true,
           "symbol": "EvidenceReportV6"
         },
         {
-          "content": "class ReportCounts(_ReportModel):\n    resolved: int = Field(ge=0)\n    introduced: int = Field(ge=0)\n    remaining: int = Field(ge=0)\n    unchanged_dependencies: int = Field(ge=0)\n    not_assessed: int = Field(ge=0)",
-          "line_end": 55,
-          "line_start": 50,
-          "path": "vulnerability_agent/report_validation.py",
+          "content": "def validate_evidence_report(report: Any) -> dict[str, Any]:\n    \"\"\"Validate report types and cross-section evidence consistency.\"\"\"\n    if not isinstance(report, dict):\n        raise EvidenceReportValidationError(\"Evidence report must be a JSON object\")\n    if report.get(\"schema_version\") not in {4, 5, 6}:\n        raise EvidenceReportValidationError(\"Unsupported evidence report schema version\")\n    normalized = normalize_legacy_report(report)\n    try:\n        EvidenceReportV6.model_validate(normalized)\n    except ValidationError as exc:\n        details = [\n            f\"{'.'.join(str(part) for part in error.get('loc', ())) or 'report'}: {error.get('msg', 'invalid value')}\"\n            for error in exc.errors(include_input=False)\n        ]\n        raise EvidenceReportValidationError(\"; \".join(details[:80])) from exc\n    return report",
+          "line_end": 31,
+          "line_start": 16,
+          "path": "vulnerability_agent/validation/validator.py",
           "rank": 3,
-          "relevant": true,
-          "symbol": "ReportCounts"
-        },
-        {
-          "content": "def validate_evidence_report(report: Any) -> dict[str, Any]:\n    \"\"\"Validate report types and cross-section evidence consistency.\"\"\"\n    if not isinstance(report, dict):\n        raise EvidenceReportValidationError(\"Evidence report must be a JSON object\")\n    if report.get(\"schema_version\") not in {4, 5, 6}:\n        raise EvidenceReportValidationError(\"Unsupported evidence report schema version\")\n    normalized = _normalize_legacy_v4(report)\n    try:\n        EvidenceReportV6.model_validate(normalized)\n    except ValidationError as exc:\n        details = [\n            f\"{'.'.join(str(part) for part in error.get('loc', ())) or 'report'}: {error.get('msg', 'invalid value')}\"\n            for error in exc.errors(include_input=False)\n        ]\n        raise EvidenceReportValidationError(\"; \".join(details[:80])) from exc\n    return report",
-          "line_end": 520,
-          "line_start": 505,
-          "path": "vulnerability_agent/report_validation.py",
-          "rank": 4,
           "relevant": true,
           "symbol": "validate_evidence_report"
         },
         {
-          "content": "class SecurityDelta(_ReportModel):\n    counts: ReportCounts\n    count_semantics: dict[str, Any]\n    version_assessment_counts: dict[str, dict[str, int]] = Field(default_factory=dict)\n    resolved: list[FindingGroup]\n    introduced: list[FindingGroup]\n    remaining: list[FindingGroup]\n    unchanged_dependencies: list[FindingGroup]\n    not_assessed: list[dict[str, Any]]",
-          "line_end": 115,
-          "line_start": 107,
-          "path": "vulnerability_agent/report_validation.py",
+          "content": "class ReportCounts(_ReportModel):\n    resolved: int = Field(ge=0)\n    introduced: int = Field(ge=0)\n    remaining: int = Field(ge=0)\n    unchanged_dependencies: int = Field(ge=0)\n    not_assessed: int = Field(ge=0)",
+          "line_end": 54,
+          "line_start": 49,
+          "path": "vulnerability_agent/validation/models.py",
+          "rank": 4,
+          "relevant": true,
+          "symbol": "ReportCounts"
+        },
+        {
+          "content": "class VulnerabilityReachability(_ReportModel):\n    advisory_id: str | None = None\n    status: Literal[\"established\", \"not_established\", \"unknown\"]\n    evidence: str | None = None\n\n    @model_validator(mode=\"after\")",
+          "line_end": 198,
+          "line_start": 193,
+          "path": "vulnerability_agent/validation/models.py",
           "rank": 5,
           "relevant": true,
-          "symbol": "SecurityDelta"
+          "symbol": "VulnerabilityReachability"
         }
       ],
       "returned_count": 5,
@@ -562,69 +562,68 @@
           "evidence_classification": "api_usage",
           "path": "main.py",
           "required_text": "review_graph.invoke(initial_state)",
-          "symbol": "main"
+          "symbol": "_run_review"
         }
       ],
       "expected_source_evidence_classification": "api_usage",
       "id": "langgraph-review-graph",
-      "matched_relevant_location_count": 2,
+      "matched_relevant_location_count": 1,
       "no_evidence_false_positive_results": null,
-      "non_relevant_results_at_5": 3,
-      "precision_at_5": 0.4,
+      "non_relevant_results_at_5": 4,
+      "precision_at_5": 0.2,
       "query": "LangGraph Dependabot review graph collect evidence analyze report end nodes",
-      "recall_at_5": 1.0,
+      "recall_at_5": 0.5,
       "reciprocal_rank": 1.0,
       "relevant_ranks": [
-        1,
-        2
+        1
       ],
-      "relevant_retrieved_count": 2,
+      "relevant_retrieved_count": 1,
       "relevant_source_evidence_exists": true,
       "retrieved": [
         {
-          "content": "def build_dependabot_review_graph(\n    *,\n    github_client: Any | None = None,\n    osv_client: httpx.AsyncClient | None = None,\n    model: Any | None = None,\n    usage_analyzer: Callable[..., Any] | None = None,\n    release_context_lookup: Callable[..., Any] | None = None,\n) -> Any:\n    \"\"\"Compile evidence collection, LLM investigation, and optional PR comment nodes.\"\"\"\n    def collect(state: DependabotReviewState) -> dict[str, Any]:\n        report = review_dependabot_pull_request(\n            state[\"repository\"], state[\"pull_request\"], github_client=github_client,\n            osv_client=osv_client, usage_analyzer=usage_analyzer,\n            release_context_lookup=release_context_lookup,\n        )\n        return {\"report\": report}\n\n    def start(_state: DependabotReviewState) -> dict[str, Any]:\n        return {}\n\n    def route_start(state: DependabotReviewState) -> str:\n        return \"analyze_evidence\" if state.get(\"report\") else \"collect_evidence\"\n\n    def route_after_collection(state: DependabotReviewState) -> str:\n        return END if state.get(\"collect_only\") else \"analyze_evidence\"\n\n    def analyze(state: DependabotReviewState) -> dict[str, Any]:\n        report = state[\"report\"]\n        try:\n            if report.get(\"schema_version\") in {4, 5, 6}:\n                validate_evidence_report(report)\n            active_model = model\n            if active_model is None:\n                from vulnerability_agent.dependencies import _model\n                active_model = _model()\n            review_text = _sanitize_ai_review(report, _model_text(active_model, render_review_prompt(report)))\n            return {\"review_markdown\": review_text,\n                    \"report\": {**report, \"ai_review\": review_text, \"ai_review_status\": \"complete\"}}\n        except Exception as exc:\n            # Preserve collected test and OSV evidence even when model access\n            # fails; never let a failed analysis create a PR comment.\n            validation = dict(report.get(\"validation\", {}))\n            if isinstance(exc, EvidenceReportValidationError):\n                validation.update({\"status\": \"failed\", \"errors\": [str(exc)[:2_000]]})\n            failed = {**report, \"status\": \"analysis_failed\", \"ai_review_status\": \"failed\",\n                      \"ai_review_error\": f\"{type(exc).__name__}: {exc}\",\n                      **({\"validation\": validation} if validation else {})}\n            return {\"report\": failed}\n\n    def comment(state: DependabotReviewState) -> dict[str, Any]:\n        try:\n            if state[\"report\"].get(\"schema_version\") in {4, 5, 6}:\n                validate_evidence_report(state[\"report\"])\n            url = post_idempotent_review_comment(\n                state[\"report\"], state[\"review_markdown\"], github_client=github_client,\n            )\n            return {\"comment_url\": url, \"report\": {**state[\"report\"], \"review_comment_url\": url}}\n        except Exception as exc:\n            return {\"report\": {**state[\"report\"], \"status\": \"comment_failed\",\n                                \"comment_error\": f\"{type(exc).__name__}: {exc}\"}}\n\n    def route_after_analysis(state: DependabotReviewState) -> str:\n        return \"post_comment\" if state.get(\"post_comment\") and state.get(\"review_markdown\") else END\n\n    graph = StateGraph(DependabotReviewState)\n    graph.add_node(\"start\", start)\n    graph.add_node(\"collect_evidence\", collect)\n    graph.add_node(\"analyze_evidence\", analyze)\n    graph.add_node(\"post_comment\", comment)\n    graph.set_entry_point(\"start\")\n    graph.add_conditional_edges(\n        \"start\", route_start,\n        {\"collect_evidence\": \"collect_evidence\", \"analyze_evidence\": \"analyze_evidence\"},\n    )\n    graph.add_conditional_edges(\n        \"collect_evidence\", route_after_collection,\n        {\"analyze_evidence\": \"analyze_evidence\", END: END},\n    )\n    graph.add_conditional_edges(\n        \"analyze_evidence\", route_after_analysis,\n        {\"post_comment\": \"post_comment\", END: END},\n    )\n    graph.add_edge(\"post_comment\", END)\n    return graph.compile()",
-          "line_end": 652,
-          "line_start": 569,
+          "content": "def build_dependabot_review_graph(\n    *,\n    github_client: Any | None = None,\n    osv_client: httpx.AsyncClient | None = None,\n    model: Any | None = None,\n    usage_analyzer: Callable[..., Any] | None = None,\n    release_context_lookup: Callable[..., Any] | None = None,\n) -> Any:\n    \"\"\"Compile evidence collection, LLM investigation, and optional PR comment nodes.\"\"\"\n    graph = StateGraph(DependabotReviewState)\n    graph.add_node(\"start\", lambda _state: {})\n    graph.add_node(\"collect_evidence\", _collect_node(\n        github_client, osv_client, usage_analyzer, release_context_lookup,\n    ))\n    graph.add_node(\"analyze_evidence\", _analyze_node(model))\n    graph.add_node(\"post_comment\", _comment_node(github_client))\n    graph.set_entry_point(\"start\")\n    graph.add_conditional_edges(\n        \"start\", _route_start,\n        {\"collect_evidence\": \"collect_evidence\", \"analyze_evidence\": \"analyze_evidence\"},\n    )\n    graph.add_conditional_edges(\n        \"collect_evidence\", _route_after_collection,\n        {\"analyze_evidence\": \"analyze_evidence\", END: END},\n    )\n    graph.add_conditional_edges(\n        \"analyze_evidence\", _route_after_analysis,\n        {\"post_comment\": \"post_comment\", END: END},\n    )\n    graph.add_edge(\"post_comment\", END)\n    return graph.compile()",
+          "line_end": 338,
+          "line_start": 308,
           "path": "vulnerability_agent/review_graph.py",
           "rank": 1,
           "relevant": true,
           "symbol": "build_dependabot_review_graph"
         },
         {
-          "content": "        review_graph = build_dependabot_review_graph(usage_analyzer=analyze_usage)\n        initial_state: dict[str, Any] = {\n            \"post_comment\": args.post_comment,\n            \"collect_only\": args.collect_only,\n        }\n        if precollected_report is not None:\n            initial_state[\"report\"] = precollected_report\n        else:\n            initial_state.update({\"repository\": str(repo), \"pull_request\": args.review_pr})\n        review_state = review_graph.invoke(initial_state)\n        report = review_state.get(\"report\", {})\n    except Exception as exc:\n        report = {\n            \"schema_version\": 3, \"mode\": \"dependabot_pr_review\", \"status\": \"review_failed\",\n            \"repository\": str(repo or \"\"), \"pull_request_reference\": args.review_pr,\n            \"error\": f\"{type(exc).__name__}: {exc}\",\n            \"note\": \"Review-only workflow; no push, PR creation, merge, or comment was attempted.\",\n        }\n\n    report[\"observability\"] = {\n        \"langsmith_tracing\": \"enabled\" if tracing_enabled else \"disabled\",\n        \"langsmith_project\": os.getenv(\"LANGSMITH_PROJECT\", \"default\") if tracing_enabled else \"\",\n    }\n    rendered = json.dumps(report, indent=2, ensure_ascii=False)\n    if not _save_report_files(rendered, automatic_report_path, requested_report_path, \"Review report\"):\n        print(rendered)\n        return 1\n    print(rendered)\n    return 0 if report.get(\"status\") == \"review_complete\" else 1",
-          "line_end": 220,
-          "line_start": 192,
-          "path": "main.py",
+          "content": "def _route_after_collection(state: DependabotReviewState) -> str:\n    return END if state.get(\"collect_only\") else \"analyze_evidence\"",
+          "line_end": 301,
+          "line_start": 300,
+          "path": "vulnerability_agent/review_graph.py",
           "rank": 2,
-          "relevant": true,
-          "symbol": "main"
+          "relevant": false,
+          "symbol": "_route_after_collection"
         },
         {
-          "content": "def test_cli_accepts_artifact_url_for_matching_repository_report(tmp_path, monkeypatch, capsys):\n    evidence_path = tmp_path / \"evidence.json\"\n    artifact_url = \"https://github.com/acme/demo/actions/runs/10/artifacts/20\"\n    evidence_path.write_text(json.dumps({\n        \"schema_version\": 2,\n        \"mode\": \"dependabot_pr_review\",\n        \"status\": \"review_complete\",\n        \"repository_full_name\": \"acme/demo\",\n        \"pull_request\": {\"number\": 17, \"author\": \"dependabot[bot]\", \"head_sha\": \"abc123\"},\n    }))\n    archived = tmp_path / \"saved report\"\n\n    class FakeReviewGraph:\n        def invoke(self, state):\n            assert state[\"report\"][\"report_artifact_url\"] == artifact_url\n            return {\"report\": {**state[\"report\"], \"ai_review\": \"Short review\", \"ai_review_status\": \"complete\"}}\n\n    monkeypatch.setattr(main, \"build_dependabot_review_graph\", lambda **_kwargs: FakeReviewGraph())\n    monkeypatch.setattr(main, \"DEFAULT_REPORT_DIRECTORY\", archived)\n\n    code = main.main([\n        \"--analyze-report\", str(evidence_path),\n        \"--report-artifact-url\", artifact_url,\n    ])\n\n    files = list(archived.glob(\"review-*.json\"))\n    assert code == 0\n    assert len(files) == 1\n    assert json.loads(files[0].read_text())[\"report_artifact_url\"] == artifact_url\n    assert json.loads(capsys.readouterr().out)[\"status\"] == \"review_complete\"",
-          "line_end": 1009,
-          "line_start": 980,
-          "path": "tests/test_dependabot_review.py",
+          "content": "def _route_after_analysis(state: DependabotReviewState) -> str:\n    return \"post_comment\" if state.get(\"post_comment\") and state.get(\"review_markdown\") else END",
+          "line_end": 305,
+          "line_start": 304,
+          "path": "vulnerability_agent/review_graph.py",
           "rank": 3,
           "relevant": false,
-          "symbol": "test_cli_accepts_artifact_url_for_matching_repository_report"
+          "symbol": "_route_after_analysis"
         },
         {
-          "content": "class DependabotReviewState(TypedDict, total=False):\n    repository: str\n    pull_request: str\n    report: dict[str, Any]\n    review_markdown: str\n    post_comment: bool\n    collect_only: bool\n    comment_url: str",
-          "line_end": 24,
-          "line_start": 17,
+          "content": "def _route_start(state: DependabotReviewState) -> str:\n    return \"analyze_evidence\" if state.get(\"report\") else \"collect_evidence\"",
+          "line_end": 297,
+          "line_start": 296,
           "path": "vulnerability_agent/review_graph.py",
           "rank": 4,
           "relevant": false,
-          "symbol": "DependabotReviewState"
+          "symbol": "_route_start"
         },
         {
-          "content": "def test_review_graph_preserves_evidence_when_model_fails(monkeypatch):\n    monkeypatch.setattr(\n        \"vulnerability_agent.review_graph.review_dependabot_pull_request\",\n        lambda *_args, **_kwargs: {\"status\": \"review_complete\", \"base\": {\"tests\": {\"passed\": True}}},\n    )\n\n    class FailingModel:\n        def invoke(self, _messages):\n            raise RuntimeError(\"model unavailable\")\n\n    result = build_dependabot_review_graph(model=FailingModel()).invoke({\n        \"repository\": \"/repo\", \"pull_request\": \"4\", \"post_comment\": True,\n    })\n    assert result[\"report\"][\"status\"] == \"analysis_failed\"\n    assert result[\"report\"][\"base\"][\"tests\"][\"passed\"] is True\n    assert \"RuntimeError\" in result[\"report\"][\"ai_review_error\"]\n    assert \"comment_url\" not in result",
-          "line_end": 243,
-          "line_start": 227,
-          "path": "tests/test_dependabot_review.py",
+          "content": "def _analyze_node(model: Any | None) -> Callable[[DependabotReviewState], dict[str, Any]]:\n    def analyze(state: DependabotReviewState) -> dict[str, Any]:\n        report = state[\"report\"]\n        try:\n            if report.get(\"schema_version\") in {4, 5, 6}:\n                validate_evidence_report(report)\n            active_model = model\n            if active_model is None:\n                from vulnerability_agent.dependencies import _model\n                active_model = _model()\n            review_text = _sanitize_ai_review(report, _model_text(active_model, render_review_prompt(report)))\n            return {\"review_markdown\": review_text,\n                    \"report\": {**report, \"ai_review\": review_text, \"ai_review_status\": \"complete\"}}\n        except Exception as exc:\n            # Preserve collected test and OSV evidence even when model access\n            # fails; never let a failed analysis create a PR comment.\n            validation = dict(report.get(\"validation\", {}))\n            if isinstance(exc, EvidenceReportValidationError):\n                validation.update({\"status\": \"failed\", \"errors\": [str(exc)[:2_000]]})\n            failed = {**report, \"status\": \"analysis_failed\", \"ai_review_status\": \"failed\",\n                      \"ai_review_error\": f\"{type(exc).__name__}: {exc}\",\n                      **({\"validation\": validation} if validation else {})}\n            return {\"report\": failed}\n\n    return analyze",
+          "line_end": 277,
+          "line_start": 253,
+          "path": "vulnerability_agent/review_graph.py",
           "rank": 5,
           "relevant": false,
-          "symbol": "test_review_graph_preserves_evidence_when_model_fails"
+          "symbol": "_analyze_node"
         }
       ],
       "returned_count": 5,
@@ -671,9 +670,9 @@
         },
         {
           "content": "def test_review_graph_stores_ai_text_after_osv_contradiction_filtering(monkeypatch):\n    monkeypatch.setattr(\n        \"vulnerability_agent.review_graph.review_dependabot_pull_request\",\n        lambda *_args, **_kwargs: {\n            \"status\": \"review_complete\", \"summary\": {}, \"source_usage\": [],\n            \"dependency_changes\": [{\"package\": \"langchain\", \"relationship\": \"direct\"}],\n            \"security_delta\": {\"introduced\": [{\"package\": \"langchain\", \"advisories\": [{\n                \"id\": \"GHSA-TEST\", \"version_assessment\": {\"status\": \"affected\"},\n            }]}]},\n        },\n    )\n\n    class Model:\n        def invoke(self, _messages):\n            return SimpleNamespace(content=\"The installed langchain version is safe to use.\")\n\n    result = build_dependabot_review_graph(model=Model()).invoke({\n        \"repository\": \"/repo\", \"pull_request\": \"11\", \"post_comment\": False,\n    })\n    assert \"safe to use\" not in result[\"report\"][\"ai_review\"]\n    assert \"safe to use\" not in result[\"review_markdown\"]",
-          "line_end": 224,
-          "line_start": 204,
-          "path": "tests/test_dependabot_review.py",
+          "line_end": 227,
+          "line_start": 207,
+          "path": "tests/test_dependabot_review_core.py",
           "rank": 2,
           "relevant": false,
           "symbol": "test_review_graph_stores_ai_text_after_osv_contradiction_filtering"
@@ -688,22 +687,22 @@
           "symbol": "model_name"
         },
         {
-          "content": "    def get_model(self) -> Any:\n        \"\"\"Create the configured model lazily and reuse it for all findings.\"\"\"\n        if self.model is None:\n            self.model = _model()\n        return self.model",
-          "line_end": 35,
-          "line_start": 31,
-          "path": "vulnerability_agent/dependencies.py",
+          "content": "def _langchain_report():\n    changes = [\n        {\"package\": \"langchain\", \"ecosystem\": \"pypi\", \"base_version\": \"0.2.16\",\n         \"head_version\": \"0.2.17\", \"relationship\": \"direct\", \"dependency_paths\": [[\"langchain\"]],\n         \"upgrade_constraints\": [{\"parent\": \"project\", \"constraint\": \"^0.2.0\", \"source\": \"pyproject.toml\"}],\n         \"upgrade_constraints_status\": \"complete\"},\n        {\"package\": \"langchain-core\", \"ecosystem\": \"pypi\", \"base_version\": \"0.2.41\",\n         \"head_version\": \"0.2.43\", \"relationship\": \"transitive\",\n         \"dependency_paths\": [[\"langchain\", \"langchain-core\"]],\n         \"upgrade_constraints\": [{\"parent\": \"langchain\", \"constraint\": \"^0.2.0\", \"source\": \"poetry.lock\"}],\n         \"upgrade_constraints_status\": \"complete\"},\n    ]\n    remaining = [_advisory(i, \"langchain-core\", \"0.2.43\") for i in range(1, 17)]\n    resolved = [_advisory(100 + i, \"langchain\", \"0.2.16\", fixed=()) for i in range(2)]\n    unaffected = [_advisory(200 + i, \"aiohttp\", \"3.10.8\") for i in range(332)]\n    return review._compact_review_report({\n        \"mode\": \"dependabot_pr_review\", \"status\": \"review_complete\",\n        \"repository_full_name\": \"acme/demo\",\n        \"pull_request\": {\"number\": 14, \"head_sha\": \"5178523a7a279ec57c0b8120d00c721894bed3d1\"},\n        \"files_changed\": [], \"dependency_changes\": changes,\n        \"source_usage_status\": \"completed_with_matches\",\n        \"source_usage\": [{\n            \"package\": \"langchain\", \"ecosystem\": \"pypi\", \"relationship\": \"direct\",\n            \"dependency_paths\": [[\"langchain\"]], \"advisory_ids\": [],\n            \"locations\": [\n                {\"path\": \"agents/tools/flights_finder.py\", \"line_start\": 10,\n                 \"line_end\": 18, \"area\": \"application\", \"evidence_classification\": \"api_usage\"},\n                {\"path\": \"agents/tools/search.py\", \"line_start\": 22,\n                 \"line_end\": 25, \"area\": \"application\", \"evidence_classification\": \"direct_import\"},\n            ],\n        }],\n        \"base\": {\"tests\": {\"passed\": True, \"returncode\": 0, \"output\": \"11 passed\"},\n                 \"security_scan\": {\"scan_status\": \"complete\", \"findings\": [], \"unresolved_packages\": []}},\n        \"head\": {\"tests\": {\"passed\": True, \"returncode\": 0, \"output\": \"11 passed\"},\n                 \"security_scan\": {\"scan_status\": \"complete\", \"findings\": [], \"unresolved_packages\": []}},\n        \"security_delta\": {\n            \"resolved\": resolved, \"introduced\": [], \"remaining\": remaining,\n            \"unaffected\": unaffected, \"not_assessed\": [],\n        },\n    })",
+          "line_end": 82,
+          "line_start": 43,
+          "path": "tests/test_comment_redesign.py",
           "rank": 4,
           "relevant": false,
-          "symbol": "AgentDependencies.get_model"
+          "symbol": "_langchain_report"
         },
         {
-          "content": "def test_ai_narrative_cannot_attribute_global_remaining_count_to_one_package():\n    report = {\n        \"security_delta\": {\n            \"counts\": {\"remaining\": 16},\n            \"remaining\": [\n                {\"package\": \"langchain\", \"advisory_count\": 4, \"advisories\": []},\n                {\"package\": \"langchain-core\", \"advisory_count\": 12, \"advisories\": []},\n            ],\n        },\n    }\n    misleading = \"There are 16 remaining advisory records indicating that langchain 0.2.17 is affected.\"\n    corrected = \"There are 16 remaining advisory records across langchain and langchain-core.\"\n\n    assert _sanitize_ai_review(report, misleading) == \"\"\n    assert _sanitize_ai_review(report, corrected) == corrected",
-          "line_end": 708,
-          "line_start": 694,
-          "path": "tests/test_workstream_f_regressions.py",
+          "content": "def test_ai_review_does_not_conflate_osv_affected_version_with_application_reachability():\n    report = {\n        \"dependency_changes\": [{\"package\": \"langchain-core\", \"relationship\": \"transitive\"}],\n        \"security_delta\": {\"remaining\": [{\"package\": \"langchain-core\", \"advisories\": [{\n            \"version_assessment\": {\"status\": \"affected\"},\n        }]}]},\n        \"source_usage\": [{\"package\": \"langchain-core\", \"relationship\": \"transitive\",\n                          \"source_usage_classifications\": [\"direct_import\"],\n                          \"vulnerability_reachability\": [{\"status\": \"unknown\"}],\n                          \"locations\": [{\"path\": \"src/agent.py\", \"line_start\": 9,\n                                         \"evidence_classification\": \"direct_import\", \"area\": \"application\"}]}],\n    }\n    ai_text = (\n        \"The installed langchain-core version is affected according to OSV. \"\n        \"langchain-core is directly affected by known vulnerabilities. \"\n        \"Production code imports langchain-core, but vulnerable API reachability is unknown.\"\n    )\n    clean = _sanitize_ai_review(report, ai_text)\n    assert \"installed langchain-core version is affected according to OSV\" in clean\n    assert \"directly affected by known vulnerabilities\" not in clean\n    assert \"Production code imports\" not in clean",
+          "line_end": 135,
+          "line_start": 115,
+          "path": "tests/test_workstream_f_regressions_evidence.py",
           "rank": 5,
           "relevant": false,
-          "symbol": "test_ai_narrative_cannot_attribute_global_remaining_count_to_one_package"
+          "symbol": "test_ai_review_does_not_conflate_osv_affected_version_with_application_reachability"
         }
       ],
       "returned_count": 5,
@@ -741,37 +740,37 @@
       "reciprocal_rank": 1.0,
       "relevant_ranks": [
         1,
-        2
+        3
       ],
       "relevant_retrieved_count": 2,
       "relevant_source_evidence_exists": true,
       "retrieved": [
         {
           "content": "    async def _call(self, server: str, repo_path: str, tool: str, arguments: dict[str, Any]) -> str:\n        spec = self._config(server, repo_path)\n        params = StdioServerParameters(command=spec[\"command\"], args=spec[\"args\"], env=os.environ.copy())\n        try:\n            async with AsyncExitStack() as stack:\n                read, write = await stack.enter_async_context(stdio_client(params))\n                session = await stack.enter_async_context(ClientSession(read, write))\n                await session.initialize()\n                result = await session.call_tool(tool, arguments=arguments)\n                if result.isError:\n                    raise MCPCallError(\n                        server, tool, self._content_text(result.content), retryable=False,\n                    )\n                if result.structuredContent:\n                    # The filesystem server may expose read_text_file as\n                    # structured content ({\"content\": \"...\"}). Returning\n                    # JSON here makes downstream parsers and patch edits\n                    # operate on the wrapper instead of the actual file.\n                    if server == \"filesystem\" and tool in {\"read_text_file\", \"read_multiple_files\"}:\n                        structured = result.structuredContent\n                        if isinstance(structured, dict):\n                            for key in (\"content\", \"text\"):\n                                value = structured.get(key)\n                                if isinstance(value, str):\n                                    return value\n                        if isinstance(structured, str):\n                            return structured\n                    return json.dumps(result.structuredContent, ensure_ascii=False)\n                return self._content_text(result.content)\n        except MCPCallError:\n            raise\n        except Exception as exc:\n            raise MCPCallError(server, tool, _exception_details(exc), retryable=True) from exc",
-          "line_end": 238,
-          "line_start": 206,
+          "line_end": 233,
+          "line_start": 201,
           "path": "mcp_client.py",
           "rank": 1,
           "relevant": true,
           "symbol": "MCPClient._call"
         },
         {
-          "content": "    def call(self, server: str, repo_path: str, tool: str, arguments: dict[str, Any]) -> str:\n        \"\"\"Run an MCP request, retrying one transient server startup failure.\"\"\"\n        for attempt in range(2):\n            try:\n                return run_async(self._call(server, repo_path, tool, arguments))\n            except MCPCallError as exc:\n                if not exc.retryable or attempt == 1:\n                    raise\n                logger.warning(\"Transient MCP %s.%s failure; retrying once: %s\", server, tool, exc)\n                time.sleep(0.25)\n        raise AssertionError(\"unreachable\")",
-          "line_end": 254,
-          "line_start": 244,
+          "content": "    def call(self, server: str, repo_path: str, tool: str, arguments: dict[str, Any]) -> str:\n        try:\n            root, safe_args = self._authorize(server, tool, repo_path, arguments)\n        except MCPPolicyError as exc:\n            self._record(server, tool, \"denied\", str(exc))\n            raise\n        event_id = self._record(server, tool, \"allowed\")\n        try:\n            result = self.client.call(server, str(root), tool, safe_args)\n        except Exception as exc:\n            # Error messages may echo arguments/source; retain only the class.\n            self.audit_log.finalize(event_id, \"error\", type(exc).__name__)\n            raise\n        return result",
+          "line_end": 181,
+          "line_start": 168,
           "path": "mcp_client.py",
           "rank": 2,
-          "relevant": true,
-          "symbol": "MCPClient.call"
-        },
-        {
-          "content": "    def call(self, server: str, repo_path: str, tool: str, arguments: dict[str, Any]) -> str:\n        try:\n            root, safe_args = self._authorize(server, tool, repo_path, arguments)\n        except MCPPolicyError as exc:\n            self._record(server, tool, \"denied\", str(exc))\n            raise\n        event_id = self._record(server, tool, \"allowed\")\n        try:\n            result = self.client.call(server, str(root), tool, safe_args)\n        except Exception as exc:\n            # Error messages may echo arguments/source; retain only the class.\n            self.audit_log.finalize(event_id, \"error\", type(exc).__name__)\n            raise\n        return result",
-          "line_end": 186,
-          "line_start": 173,
-          "path": "mcp_client.py",
-          "rank": 3,
           "relevant": false,
           "symbol": "MCPPolicyProxy.call"
+        },
+        {
+          "content": "    def call(self, server: str, repo_path: str, tool: str, arguments: dict[str, Any]) -> str:\n        \"\"\"Run an MCP request, retrying one transient server startup failure.\"\"\"\n        for attempt in range(2):\n            try:\n                return run_async(self._call(server, repo_path, tool, arguments))\n            except MCPCallError as exc:\n                if not exc.retryable or attempt == 1:\n                    raise\n                logger.warning(\"Transient MCP %s.%s failure; retrying once: %s\", server, tool, exc)\n                time.sleep(0.25)\n        raise AssertionError(\"unreachable\")",
+          "line_end": 249,
+          "line_start": 239,
+          "path": "mcp_client.py",
+          "rank": 3,
+          "relevant": true,
+          "symbol": "MCPClient.call"
         },
         {
           "content": "    def __init__(self, server: str, tool: str, detail: str, *, retryable: bool = False) -> None:\n        self.server = server\n        self.tool = tool\n        self.retryable = retryable\n        super().__init__(f\"MCP {server}.{tool} failed: {detail}\")",
@@ -805,31 +804,31 @@
       "expected_relevant_locations": [
         {
           "evidence_classification": "api_usage",
-          "path": "vulnerability_agent/retrieval.py",
+          "path": "vulnerability_agent/retrieval/index.py",
           "required_text": "from qdrant_client import QdrantClient",
           "symbol": "LocalCodeRetriever.__init__"
         },
         {
           "evidence_classification": "api_usage",
-          "path": "vulnerability_agent/retrieval.py",
+          "path": "vulnerability_agent/retrieval/index.py",
           "required_text": "PointStruct(id=document[\"id\"], vector=vector, payload=document)",
           "symbol": "LocalCodeRetriever.index_sources"
         },
         {
           "evidence_classification": "api_usage",
-          "path": "vulnerability_agent/retrieval.py",
+          "path": "vulnerability_agent/retrieval/index.py",
           "required_text": "from qdrant_client.models import FieldCondition, Filter, MatchValue",
           "symbol": "LocalCodeRetriever._repo_filter"
         },
         {
           "evidence_classification": "api_usage",
-          "path": "vulnerability_agent/retrieval.py",
+          "path": "vulnerability_agent/retrieval/index.py",
           "required_text": "self.client.scroll(",
           "symbol": "LocalCodeRetriever._load_documents"
         },
         {
           "evidence_classification": "api_usage",
-          "path": "vulnerability_agent/retrieval.py",
+          "path": "vulnerability_agent/retrieval/index.py",
           "required_text": "self.client.query_points(",
           "symbol": "LocalCodeRetriever.retrieve"
         },
@@ -842,67 +841,66 @@
       ],
       "expected_source_evidence_classification": "api_usage",
       "id": "qdrant-retriever",
-      "matched_relevant_location_count": 5,
+      "matched_relevant_location_count": 4,
       "no_evidence_false_positive_results": null,
-      "non_relevant_results_at_5": 0,
-      "precision_at_5": 1.0,
+      "non_relevant_results_at_5": 1,
+      "precision_at_5": 0.8,
       "query": "QdrantClient local vector database collection create query points storage",
-      "recall_at_5": 0.8333333333333334,
+      "recall_at_5": 0.6666666666666666,
       "reciprocal_rank": 1.0,
       "relevant_ranks": [
         1,
         2,
-        3,
         4,
         5
       ],
-      "relevant_retrieved_count": 5,
+      "relevant_retrieved_count": 4,
       "relevant_source_evidence_exists": true,
       "retrieved": [
         {
           "content": "    def __init__(\n        self,\n        storage_path: str | Path,\n        *,\n        embedding_model: str = DEFAULT_EMBEDDING_MODEL,\n        client: Any | None = None,\n        embedder: Any | None = None,\n    ) -> None:\n        try:\n            if client is None:\n                from qdrant_client import QdrantClient\n                client = QdrantClient\n            if embedder is None:\n                from fastembed import TextEmbedding\n                embedder = TextEmbedding\n            from qdrant_client.models import Distance, VectorParams\n        except ImportError as exc:\n            raise RuntimeError(\n                \"Code RAG dependencies are missing. Install requirements.txt to use Qdrant retrieval.\"\n            ) from exc\n        self.storage_path = Path(storage_path).expanduser().resolve()\n        self.storage_path.mkdir(parents=True, exist_ok=True, mode=0o700)\n        try:\n            os.chmod(self.storage_path, 0o700)\n        except OSError:\n            pass\n        self.client = client(path=str(self.storage_path)) if isinstance(client, type) else client\n        self.embedder = embedder(model_name=embedding_model) if isinstance(embedder, type) else embedder\n        self.collection_name = \"repository_code\"\n        self._documents: dict[str, list[dict[str, Any]]] = {}\n        if not self.client.collection_exists(self.collection_name):\n            self.client.create_collection(\n                collection_name=self.collection_name,\n                vectors_config=VectorParams(size=VECTOR_SIZE, distance=Distance.COSINE),\n            )",
-          "line_end": 534,
-          "line_start": 500,
-          "path": "vulnerability_agent/retrieval.py",
+          "line_end": 65,
+          "line_start": 31,
+          "path": "vulnerability_agent/retrieval/index.py",
           "rank": 1,
           "relevant": true,
           "symbol": "LocalCodeRetriever.__init__"
         },
         {
           "content": "    def index_sources(\n        self, repository: str | Path, sources: dict[str, str], *, snapshot_id: str = \"\",\n    ) -> int:\n        \"\"\"Replace the repository's chunks and persist their local vectors.\"\"\"\n        from reporting import _redact_source\n\n        repo_key = self._repo_key(repository)\n        documents: list[dict[str, Any]] = []\n        for relative_path, source in sources.items():\n            for chunk in chunk_source(\n                relative_path, _redact_source(source),\n                parser_cache_dir=self.storage_path / \"tree-sitter\",\n            ):\n                chunk = _enrich_chunk_metadata(relative_path, source, chunk)\n                chunk_id = str(uuid.uuid5(uuid.NAMESPACE_URL, \"\\0\".join((repo_key, chunk[\"path\"], chunk[\"symbol\"], str(chunk[\"line_start\"])))))\n                chunk.update({\n                    \"id\": chunk_id, \"repo_id\": repo_key,\n                    \"snapshot_id\": snapshot_id,\n                    \"metadata_version\": INDEX_METADATA_VERSION,\n                    \"search_text\": f\"{chunk['path']} {chunk['symbol']} {chunk['content']}\",\n                })\n                documents.append(chunk)\n        point_filter = self._repo_filter(repo_key)\n        from qdrant_client.models import PointStruct\n\n        self.client.delete(collection_name=self.collection_name, points_selector=point_filter, wait=True)\n        if documents:\n            vectors = self._embed([str(document[\"search_text\"]) for document in documents])\n            points = [\n                PointStruct(id=document[\"id\"], vector=vector, payload=document)\n                for document, vector in zip(documents, vectors)\n            ]\n            self.client.upsert(collection_name=self.collection_name, points=points, wait=True)\n        self._documents[repo_key] = documents\n        return len(documents)",
-          "line_end": 589,
-          "line_start": 555,
-          "path": "vulnerability_agent/retrieval.py",
+          "line_end": 120,
+          "line_start": 86,
+          "path": "vulnerability_agent/retrieval/index.py",
           "rank": 2,
           "relevant": true,
           "symbol": "LocalCodeRetriever.index_sources"
         },
         {
-          "content": "    @staticmethod\n    def _repo_filter(repo_key: str) -> Any:\n        from qdrant_client.models import FieldCondition, Filter, MatchValue\n\n        return Filter(must=[FieldCondition(key=\"repo_id\", match=MatchValue(value=repo_key))])",
-          "line_end": 595,
-          "line_start": 591,
-          "path": "vulnerability_agent/retrieval.py",
+          "content": "def test_retrieval_embeds_the_query_once_and_issues_one_dense_query(tmp_path):\n    \"\"\"Bound retrieval work by call count instead of wall-clock timing.\"\"\"\n    pytest.importorskip(\"qdrant_client\")\n    from qdrant_client import QdrantClient\n\n    repository = tmp_path / \"demo-repo\"\n    repository.mkdir()\n    storage = tmp_path / \"qdrant\"\n    sources = {\n        \"src/client.py\": \"import requests\\ndef fetch_data(url):\\n    return requests.get(url)\\n\",\n        \"tests/test_client.py\": \"def test_fetch():\\n    assert True\\n\",\n    }\n    embedder = CountingEmbedder()\n    client = CountingClient(QdrantClient(path=str(storage)))\n    retriever = LocalCodeRetriever(storage, client=client, embedder=embedder)\n    retriever.index_sources(repository, sources)\n    embedder.batches.clear()\n    client.query_points_calls = 0\n    client.upsert_calls = 0\n\n    retriever.retrieve(repository, \"requests fetch_data\", limit=3)\n    retriever.client.close()\n\n    assert embedder.batches == [[\"requests fetch_data\"]]\n    assert client.query_points_calls == 1\n    assert client.upsert_calls == 0",
+          "line_end": 355,
+          "line_start": 330,
+          "path": "tests/test_retrieval.py",
           "rank": 3,
+          "relevant": false,
+          "symbol": "test_retrieval_embeds_the_query_once_and_issues_one_dense_query"
+        },
+        {
+          "content": "    @staticmethod\n    def _repo_filter(repo_key: str) -> Any:\n        from qdrant_client.models import FieldCondition, Filter, MatchValue\n\n        return Filter(must=[FieldCondition(key=\"repo_id\", match=MatchValue(value=repo_key))])",
+          "line_end": 126,
+          "line_start": 122,
+          "path": "vulnerability_agent/retrieval/index.py",
+          "rank": 4,
           "relevant": true,
           "symbol": "LocalCodeRetriever._repo_filter"
         },
         {
           "content": "def test_qdrant_local_index_searches_and_reloads_persisted_chunks(tmp_path):\n    pytest.importorskip(\"qdrant_client\")\n    repository = tmp_path / \"demo-repo\"\n    repository.mkdir()\n    storage = tmp_path / \"qdrant\"\n    sources = {\n        \"src/client.py\": \"\"\"import requests\ndef fetch_data(url):\n    return requests.get(url)\n\"\"\",\n        \"tests/test_client.py\": \"\"\"def test_fetch_data():\n    assert fetch_data('https://example.test')\n\"\"\",\n    }\n\n    retriever = LocalCodeRetriever(storage, embedder=FakeEmbedder())\n    indexed_count = retriever.index_sources(repository, sources)\n    results = retriever.retrieve(repository, \"requests fetch_data\", limit=3)\n    retriever.client.close()\n\n    assert indexed_count >= 2\n    assert results\n    assert results[0][\"path\"] == \"src/client.py\"\n\n    reopened = LocalCodeRetriever(storage, embedder=FakeEmbedder())\n    persisted_results = reopened.retrieve(repository, \"requests fetch_data\", limit=3)\n    reopened.client.close()\n    assert persisted_results[0][\"path\"] == \"src/client.py\"",
-          "line_end": 325,
-          "line_start": 298,
+          "line_end": 385,
+          "line_start": 358,
           "path": "tests/test_retrieval.py",
-          "rank": 4,
-          "relevant": true,
-          "symbol": "test_qdrant_local_index_searches_and_reloads_persisted_chunks"
-        },
-        {
-          "content": "    def retrieve(\n        self,\n        repository: str | Path,\n        query: str,\n        *,\n        limit: int = MAX_RETRIEVAL_RESULTS,\n        package_name: str | None = None,\n        test_context: bool | None = None,\n    ) -> list[dict[str, Any]]:\n        \"\"\"Combine exact BM25 and local dense results, then favor trace locations.\"\"\"\n        repo_key = self._repo_key(repository)\n        documents = self._load_documents(repo_key)\n        if not documents or not query.strip():\n            return []\n        retrieval_query = query\n        if package_name:\n            retrieval_query = f\"{' '.join(package_search_terms(package_name))} {query}\"\n        lexical = bm25_rank(retrieval_query, documents, limit=50)\n        # Preserve the original semantic query for dense ranking. Module-name\n        # expansion is useful to BM25 for exact imports, but adding tokens to\n        # the embedding can distort concept-level relevance.\n        query_vector = self._embed([query])[0]\n        points = self.client.query_points(\n            collection_name=self.collection_name,\n            query=query_vector, query_filter=self._repo_filter(repo_key),\n            limit=50, with_payload=True,\n        ).points\n        dense = [str(point.id) for point in points]\n        trace_locations = _trace_locations(query)\n        by_id = {str(document[\"id\"]): document for document in documents}\n        related: list[str] = []\n        if trace_locations:\n            for document in documents:\n                for filename, line in trace_locations:\n                    if Path(str(document[\"path\"])).name != filename:\n                        continue\n                    if line is None or int(document[\"line_start\"]) - 5 <= line <= int(document[\"line_end\"]) + 5:\n                        related.append(str(document[\"id\"]))\n                        break\n        # Package-aware qualification can discard generic results after fusion.\n        # Rank the existing BM25/dense top-50 candidate pools before filtering;\n        # final response size remains bounded by `limit`.\n        fused = reciprocal_rank_fusion(lexical, dense, related, limit=50)\n        # Exact stack-frame path/line matches are high-confidence evidence;\n        # return them before semantic matches when handling a failed attempt.\n        ordered_ids = list(dict.fromkeys([*related, *fused]))\n        package_symbols: set[str] = set()\n        query_test_context = test_context if test_context is not None else bool(\n            package_name and re.search(r\"\\b(test|tests|mock|mocked|fixture)\\b\", query, re.IGNORECASE)\n        )\n        if package_name:\n            # Keep Qdrant, BM25 and RRF as candidate-generation/ranking lanes,\n            # then require package-specific syntax or a literal package\n            # reference before a chunk can be returned as usage evidence.\n            ordered_ids = _package_ranked_ids(\n                documents, ordered_ids, package_name, query=query, test_context=query_test_context,\n            )\n            modules = {module.casefold() for module in distribution_import_modules(package_name)}\n            package_symbols = {\n                str(binding.get(\"binding\", \"\"))\n                for item in documents for binding in item.get(\"import_bindings\", [])\n                if str(binding.get(\"module\", \"\")).split(\".\", 1)[0].casefold() in modules\n            }\n        results = [by_id[document_id] for document_id in ordered_ids if document_id in by_id][:limit]\n        if package_name:\n            return [\n                {**document, \"package_evidence_classification\": _package_evidence(\n                    document, package_name, query=query, package_symbols=package_symbols,\n                    test_context=query_test_context,\n                )}\n                for document in results\n            ]\n        return results",
-          "line_end": 679,
-          "line_start": 607,
-          "path": "vulnerability_agent/retrieval.py",
           "rank": 5,
           "relevant": true,
-          "symbol": "LocalCodeRetriever.retrieve"
+          "symbol": "test_qdrant_local_index_searches_and_reloads_persisted_chunks"
         }
       ],
       "returned_count": 5,
@@ -918,7 +916,7 @@
       "expected_relevant_locations": [
         {
           "evidence_classification": "api_usage",
-          "path": "vulnerability_agent/retrieval.py",
+          "path": "vulnerability_agent/retrieval/index.py",
           "required_text": "from fastembed import TextEmbedding",
           "symbol": "LocalCodeRetriever.__init__"
         }
@@ -940,48 +938,48 @@
       "retrieved": [
         {
           "content": "    def __init__(\n        self,\n        storage_path: str | Path,\n        *,\n        embedding_model: str = DEFAULT_EMBEDDING_MODEL,\n        client: Any | None = None,\n        embedder: Any | None = None,\n    ) -> None:\n        try:\n            if client is None:\n                from qdrant_client import QdrantClient\n                client = QdrantClient\n            if embedder is None:\n                from fastembed import TextEmbedding\n                embedder = TextEmbedding\n            from qdrant_client.models import Distance, VectorParams\n        except ImportError as exc:\n            raise RuntimeError(\n                \"Code RAG dependencies are missing. Install requirements.txt to use Qdrant retrieval.\"\n            ) from exc\n        self.storage_path = Path(storage_path).expanduser().resolve()\n        self.storage_path.mkdir(parents=True, exist_ok=True, mode=0o700)\n        try:\n            os.chmod(self.storage_path, 0o700)\n        except OSError:\n            pass\n        self.client = client(path=str(self.storage_path)) if isinstance(client, type) else client\n        self.embedder = embedder(model_name=embedding_model) if isinstance(embedder, type) else embedder\n        self.collection_name = \"repository_code\"\n        self._documents: dict[str, list[dict[str, Any]]] = {}\n        if not self.client.collection_exists(self.collection_name):\n            self.client.create_collection(\n                collection_name=self.collection_name,\n                vectors_config=VectorParams(size=VECTOR_SIZE, distance=Distance.COSINE),\n            )",
-          "line_end": 534,
-          "line_start": 500,
-          "path": "vulnerability_agent/retrieval.py",
+          "line_end": 65,
+          "line_start": 31,
+          "path": "vulnerability_agent/retrieval/index.py",
           "rank": 1,
           "relevant": true,
           "symbol": "LocalCodeRetriever.__init__"
         },
         {
-          "content": "class LocalCodeRetriever:\n    \"\"\"Persistent Qdrant index with local embeddings and hybrid retrieval.\"\"\"",
-          "line_end": 499,
-          "line_start": 497,
-          "path": "vulnerability_agent/retrieval.py",
+          "content": "\"\"\"Local, syntax-aware hybrid retrieval for source files and tests.\n\nCode stays on the user's machine: FastEmbed creates local vectors and Qdrant\npersists chunks in the agent's state directory. Keyword ranking is kept\nalongside vector ranking because package names and stack-trace symbols need\nexact matches.\n\"\"\"\nfrom __future__ import annotations\n\nfrom vulnerability_agent.retrieval.chunking import (\n    _chunk_used_names,\n    _enrich_chunk_metadata,\n    _javascript_fallback_chunks,\n    _line_chunks,\n    _python_chunks,\n    _python_import_bindings,\n    _safe_relative_path,\n    _source_area,\n    _source_import_bindings,\n    _tree_sitter_chunks,\n    chunk_source,\n)\nfrom vulnerability_agent.retrieval.constants import (\n    CODE_SUFFIX_LANGUAGE,\n    DEFAULT_EMBEDDING_MODEL,\n    INDEX_METADATA_VERSION,\n    MAX_CHUNK_CHARS,\n    MAX_RETRIEVAL_RESULTS,\n    RRF_CONSTANT,\n    VECTOR_SIZE,\n)\nfrom vulnerability_agent.retrieval.index import LocalCodeRetriever\nfrom vulnerability_agent.retrieval.ranking import (\n    _package_evidence,\n    _package_ranked_ids,\n    _trace_locations,\n    bm25_rank,\n    reciprocal_rank_fusion,\n)\nfrom vulnerability_agent.retrieval.render import render_context\nfrom vulnerability_agent.retrieval.tokenization import _tokens\n\n__all__ = [\n    \"CODE_SUFFIX_LANGUAGE\",\n    \"DEFAULT_EMBEDDING_MODEL\",\n    \"INDEX_METADATA_VERSION\",\n    \"LocalCodeRetriever\",\n    \"MAX_CHUNK_CHARS\",\n    \"MAX_RETRIEVAL_RESULTS\",\n    \"RRF_CONSTANT\",\n    \"VECTOR_SIZE\",\n    \"_chunk_used_names\",\n    \"_enrich_chunk_metadata\",\n    \"_javascript_fallback_chunks\",\n    \"_line_chunks\",\n    \"_package_evidence\",\n    \"_package_ranked_ids\",\n    \"_python_chunks\",\n    \"_python_import_bindings\",\n    \"_safe_relative_path\",\n    \"_source_area\",\n    \"_source_import_bindings\",\n    \"_tokens\",\n    \"_trace_locations\",\n    \"_tree_sitter_chunks\",\n    \"bm25_rank\",\n    \"chunk_source\",\n    \"reciprocal_rank_fusion\",\n    \"render_context\",\n]",
+          "line_end": 70,
+          "line_start": 1,
+          "path": "vulnerability_agent/retrieval/__init__.py",
           "rank": 2,
           "relevant": false,
+          "symbol": "lines_1_70"
+        },
+        {
+          "content": "class LocalCodeRetriever:\n    \"\"\"Persistent Qdrant index with local embeddings and hybrid retrieval.\"\"\"",
+          "line_end": 30,
+          "line_start": 28,
+          "path": "vulnerability_agent/retrieval/index.py",
+          "rank": 3,
+          "relevant": false,
           "symbol": "LocalCodeRetriever"
+        },
+        {
+          "content": "\"\"\"Shared constants and patterns for local source retrieval.\"\"\"\nfrom __future__ import annotations\n\nimport re\n\nDEFAULT_EMBEDDING_MODEL = \"BAAI/bge-small-en-v1.5\"\nVECTOR_SIZE = 384\nMAX_CHUNK_CHARS = 5_000\nMAX_RETRIEVAL_RESULTS = 8\nRRF_CONSTANT = 60\nINDEX_METADATA_VERSION = 2\n\nCODE_SUFFIX_LANGUAGE = {\n    \".py\": \"python\", \".js\": \"javascript\", \".jsx\": \"javascript\",\n    \".mjs\": \"javascript\", \".cjs\": \"javascript\",\n    \".ts\": \"typescript\", \".tsx\": \"tsx\",\n}\n\n_TOKEN_RE = re.compile(r\"[A-Za-z_][A-Za-z0-9_.$-]*|\\d+\")\n_TRACE_PATH_RE = re.compile(\n    r\"(?:File\\s+['\\\"]([^'\\\"]+\\.(?:py|jsx?|tsx?))['\\\"],\\s*line\\s+(\\d+)|\"\n    r\"\\b([\\w./-]+\\.(?:py|jsx?|tsx?)):(\\d+))\",\n    re.IGNORECASE,\n)",
+          "line_end": 24,
+          "line_start": 1,
+          "path": "vulnerability_agent/retrieval/constants.py",
+          "rank": 4,
+          "relevant": false,
+          "symbol": "lines_1_24"
         },
         {
           "content": "def _model() -> ChatOpenAI:\n    \"\"\"Create the configured chat model when a finding needs planning.\"\"\"\n    if not os.getenv(\"OPENAI_API_KEY\"):\n        raise RuntimeError(\"OPENAI_API_KEY is required to create a vulnerability patch\")\n    return ChatOpenAI(model=model_name())",
           "line_end": 18,
           "line_start": 14,
           "path": "vulnerability_agent/dependencies.py",
-          "rank": 3,
-          "relevant": false,
-          "symbol": "_model"
-        },
-        {
-          "content": "def test_review_graph_stores_ai_text_after_osv_contradiction_filtering(monkeypatch):\n    monkeypatch.setattr(\n        \"vulnerability_agent.review_graph.review_dependabot_pull_request\",\n        lambda *_args, **_kwargs: {\n            \"status\": \"review_complete\", \"summary\": {}, \"source_usage\": [],\n            \"dependency_changes\": [{\"package\": \"langchain\", \"relationship\": \"direct\"}],\n            \"security_delta\": {\"introduced\": [{\"package\": \"langchain\", \"advisories\": [{\n                \"id\": \"GHSA-TEST\", \"version_assessment\": {\"status\": \"affected\"},\n            }]}]},\n        },\n    )\n\n    class Model:\n        def invoke(self, _messages):\n            return SimpleNamespace(content=\"The installed langchain version is safe to use.\")\n\n    result = build_dependabot_review_graph(model=Model()).invoke({\n        \"repository\": \"/repo\", \"pull_request\": \"11\", \"post_comment\": False,\n    })\n    assert \"safe to use\" not in result[\"report\"][\"ai_review\"]\n    assert \"safe to use\" not in result[\"review_markdown\"]",
-          "line_end": 224,
-          "line_start": 204,
-          "path": "tests/test_dependabot_review.py",
-          "rank": 4,
-          "relevant": false,
-          "symbol": "test_review_graph_stores_ai_text_after_osv_contradiction_filtering"
-        },
-        {
-          "content": "    def retrieve(\n        self,\n        repository: str | Path,\n        query: str,\n        *,\n        limit: int = MAX_RETRIEVAL_RESULTS,\n        package_name: str | None = None,\n        test_context: bool | None = None,\n    ) -> list[dict[str, Any]]:\n        \"\"\"Combine exact BM25 and local dense results, then favor trace locations.\"\"\"\n        repo_key = self._repo_key(repository)\n        documents = self._load_documents(repo_key)\n        if not documents or not query.strip():\n            return []\n        retrieval_query = query\n        if package_name:\n            retrieval_query = f\"{' '.join(package_search_terms(package_name))} {query}\"\n        lexical = bm25_rank(retrieval_query, documents, limit=50)\n        # Preserve the original semantic query for dense ranking. Module-name\n        # expansion is useful to BM25 for exact imports, but adding tokens to\n        # the embedding can distort concept-level relevance.\n        query_vector = self._embed([query])[0]\n        points = self.client.query_points(\n            collection_name=self.collection_name,\n            query=query_vector, query_filter=self._repo_filter(repo_key),\n            limit=50, with_payload=True,\n        ).points\n        dense = [str(point.id) for point in points]\n        trace_locations = _trace_locations(query)\n        by_id = {str(document[\"id\"]): document for document in documents}\n        related: list[str] = []\n        if trace_locations:\n            for document in documents:\n                for filename, line in trace_locations:\n                    if Path(str(document[\"path\"])).name != filename:\n                        continue\n                    if line is None or int(document[\"line_start\"]) - 5 <= line <= int(document[\"line_end\"]) + 5:\n                        related.append(str(document[\"id\"]))\n                        break\n        # Package-aware qualification can discard generic results after fusion.\n        # Rank the existing BM25/dense top-50 candidate pools before filtering;\n        # final response size remains bounded by `limit`.\n        fused = reciprocal_rank_fusion(lexical, dense, related, limit=50)\n        # Exact stack-frame path/line matches are high-confidence evidence;\n        # return them before semantic matches when handling a failed attempt.\n        ordered_ids = list(dict.fromkeys([*related, *fused]))\n        package_symbols: set[str] = set()\n        query_test_context = test_context if test_context is not None else bool(\n            package_name and re.search(r\"\\b(test|tests|mock|mocked|fixture)\\b\", query, re.IGNORECASE)\n        )\n        if package_name:\n            # Keep Qdrant, BM25 and RRF as candidate-generation/ranking lanes,\n            # then require package-specific syntax or a literal package\n            # reference before a chunk can be returned as usage evidence.\n            ordered_ids = _package_ranked_ids(\n                documents, ordered_ids, package_name, query=query, test_context=query_test_context,\n            )\n            modules = {module.casefold() for module in distribution_import_modules(package_name)}\n            package_symbols = {\n                str(binding.get(\"binding\", \"\"))\n                for item in documents for binding in item.get(\"import_bindings\", [])\n                if str(binding.get(\"module\", \"\")).split(\".\", 1)[0].casefold() in modules\n            }\n        results = [by_id[document_id] for document_id in ordered_ids if document_id in by_id][:limit]\n        if package_name:\n            return [\n                {**document, \"package_evidence_classification\": _package_evidence(\n                    document, package_name, query=query, package_symbols=package_symbols,\n                    test_context=query_test_context,\n                )}\n                for document in results\n            ]\n        return results",
-          "line_end": 679,
-          "line_start": 607,
-          "path": "vulnerability_agent/retrieval.py",
           "rank": 5,
           "relevant": false,
-          "symbol": "LocalCodeRetriever.retrieve"
+          "symbol": "_model"
         }
       ],
       "returned_count": 5,
@@ -997,7 +995,7 @@
       "expected_relevant_locations": [
         {
           "evidence_classification": "api_usage",
-          "path": "vulnerability_agent/retrieval.py",
+          "path": "vulnerability_agent/retrieval/chunking.py",
           "required_text": "get_parser(language)",
           "symbol": "_tree_sitter_chunks"
         }
@@ -1019,48 +1017,48 @@
       "retrieved": [
         {
           "content": "def _tree_sitter_chunks(\n    relative_path: str, source: str, parser_cache_dir: str | Path | None = None,\n) -> list[dict[str, Any]]:\n    \"\"\"Extract JS/TS declarations with Tree-sitter when available.\"\"\"\n    try:\n        from tree_sitter_language_pack import PackConfig, configure, get_parser\n\n        cache_dir = Path(parser_cache_dir or (Path.home() / \".vulnerability-patch-agent\" / \"code-index\" / \"tree-sitter\"))\n        cache_dir.mkdir(parents=True, exist_ok=True, mode=0o700)\n        configure(PackConfig(cache_dir=str(cache_dir)))\n\n        language = CODE_SUFFIX_LANGUAGE[Path(relative_path).suffix.lower()]\n        parser = get_parser(language)\n        tree = parser.parse(source.encode(\"utf-8\"))\n    except Exception:\n        return []\n    lines = source.splitlines()\n    declaration_types = {\n        \"function_declaration\", \"function_expression\", \"generator_function_declaration\",\n        \"method_definition\", \"class_declaration\", \"class\", \"lexical_declaration\",\n    }\n    chunks: list[dict[str, Any]] = []\n\n    def visit(node: Any, parent_symbol: str = \"\") -> None:\n        if node.type in declaration_types:\n            start, end = int(node.start_point.row) + 1, int(node.end_point.row) + 1\n            text = \"\\n\".join(lines[start - 1:end])\n            name_node = node.child_by_field_name(\"name\")\n            name = source[name_node.start_byte:name_node.end_byte] if name_node else node.type\n            symbol = f\"{parent_symbol}.{name}\" if parent_symbol else name\n            if len(text) <= MAX_CHUNK_CHARS:\n                chunks.append({\n                    \"path\": relative_path, \"symbol\": symbol,\n                    \"line_start\": start, \"line_end\": end,\n                    \"language\": CODE_SUFFIX_LANGUAGE[Path(relative_path).suffix.lower()],\n                    \"content\": text,\n                })\n                # For a declaration, only recurse into nested declarations so\n                # methods are independently retrievable without indexing every\n                # expression as a separate chunk.\n                for child in node.children:\n                    visit(child, symbol if node.type in {\"class\", \"class_declaration\"} else parent_symbol)\n                return\n        for child in node.children:\n            visit(child, parent_symbol)\n\n    visit(tree.root_node)\n    return chunks",
-          "line_end": 173,
-          "line_start": 126,
-          "path": "vulnerability_agent/retrieval.py",
+          "line_end": 143,
+          "line_start": 96,
+          "path": "vulnerability_agent/retrieval/chunking.py",
           "rank": 1,
           "relevant": true,
           "symbol": "_tree_sitter_chunks"
         },
         {
           "content": "def _javascript_fallback_chunks(relative_path: str, source: str) -> list[dict[str, Any]]:\n    \"\"\"Preserve common JS/TS declaration boundaries if a grammar is unavailable.\"\"\"\n    lines = source.splitlines()\n    declaration = re.compile(\n        r\"^\\s*(?:export\\s+)?(?:default\\s+)?(?:async\\s+)?\"\n        r\"(?:function\\s*\\*?\\s*([\\w$]+)|class\\s+([\\w$]+)|\"\n        r\"(?:const|let|var)\\s+([\\w$]+)\\s*=\\s*(?:async\\s*)?(?:\\([^)]*\\)|[\\w$]+)\\s*=>)\"\n    )\n    chunks: list[dict[str, Any]] = []\n    for index, line in enumerate(lines):\n        match = declaration.match(line)\n        if not match:\n            continue\n        name = next((value for value in match.groups() if value), \"anonymous\")\n        brace_balance = 0\n        saw_brace = False\n        end_index = index\n        for end_index in range(index, min(len(lines), index + 120)):\n            brace_balance += lines[end_index].count(\"{\") - lines[end_index].count(\"}\")\n            saw_brace = saw_brace or \"{\" in lines[end_index]\n            if saw_brace and brace_balance <= 0:\n                break\n        text = \"\\n\".join(lines[index:end_index + 1])\n        chunks.append({\n            \"path\": relative_path, \"symbol\": name,\n            \"line_start\": index + 1, \"line_end\": end_index + 1,\n            \"language\": CODE_SUFFIX_LANGUAGE[Path(relative_path).suffix.lower()],\n            \"content\": text,\n        })\n    return chunks",
-          "line_end": 417,
-          "line_start": 388,
-          "path": "vulnerability_agent/retrieval.py",
+          "line_end": 276,
+          "line_start": 247,
+          "path": "vulnerability_agent/retrieval/chunking.py",
           "rank": 2,
           "relevant": false,
           "symbol": "_javascript_fallback_chunks"
         },
         {
-          "content": "def chunk_source(\n    relative_path: str, source: str, *, parser_cache_dir: str | Path | None = None,\n) -> list[dict[str, Any]]:\n    \"\"\"Create safe, source-located chunks for Python and JS/TS files.\"\"\"\n    if not _safe_relative_path(relative_path) or not source.strip():\n        return []\n    suffix = Path(relative_path).suffix.lower()\n    if suffix == \".py\":\n        chunks = _python_chunks(relative_path, source)\n    else:\n        chunks = _tree_sitter_chunks(relative_path, source, parser_cache_dir)\n        if not chunks:\n            chunks = _javascript_fallback_chunks(relative_path, source)\n    return chunks or _line_chunks(relative_path, source)",
-          "line_end": 433,
-          "line_start": 420,
-          "path": "vulnerability_agent/retrieval.py",
+          "content": "\"\"\"Shared constants and patterns for local source retrieval.\"\"\"\nfrom __future__ import annotations\n\nimport re\n\nDEFAULT_EMBEDDING_MODEL = \"BAAI/bge-small-en-v1.5\"\nVECTOR_SIZE = 384\nMAX_CHUNK_CHARS = 5_000\nMAX_RETRIEVAL_RESULTS = 8\nRRF_CONSTANT = 60\nINDEX_METADATA_VERSION = 2\n\nCODE_SUFFIX_LANGUAGE = {\n    \".py\": \"python\", \".js\": \"javascript\", \".jsx\": \"javascript\",\n    \".mjs\": \"javascript\", \".cjs\": \"javascript\",\n    \".ts\": \"typescript\", \".tsx\": \"tsx\",\n}\n\n_TOKEN_RE = re.compile(r\"[A-Za-z_][A-Za-z0-9_.$-]*|\\d+\")\n_TRACE_PATH_RE = re.compile(\n    r\"(?:File\\s+['\\\"]([^'\\\"]+\\.(?:py|jsx?|tsx?))['\\\"],\\s*line\\s+(\\d+)|\"\n    r\"\\b([\\w./-]+\\.(?:py|jsx?|tsx?)):(\\d+))\",\n    re.IGNORECASE,\n)",
+          "line_end": 24,
+          "line_start": 1,
+          "path": "vulnerability_agent/retrieval/constants.py",
           "rank": 3,
           "relevant": false,
-          "symbol": "chunk_source"
+          "symbol": "lines_1_24"
         },
         {
-          "content": "def test_javascript_chunking_preserves_common_declaration_boundaries():\n    chunks = chunk_source(\"src/client.js\", \"\"\"import axios from 'axios';\nexport function fetchClient(url) {\n  return axios.get(url);\n}\n\"\"\")\n\n    assert len(chunks) == 1\n    assert chunks[0][\"symbol\"] == \"fetchClient\"\n    assert chunks[0][\"line_start\"] == 2",
-          "line_end": 53,
-          "line_start": 44,
-          "path": "tests/test_retrieval.py",
+          "content": "\"\"\"Local, syntax-aware hybrid retrieval for source files and tests.\n\nCode stays on the user's machine: FastEmbed creates local vectors and Qdrant\npersists chunks in the agent's state directory. Keyword ranking is kept\nalongside vector ranking because package names and stack-trace symbols need\nexact matches.\n\"\"\"\nfrom __future__ import annotations\n\nfrom vulnerability_agent.retrieval.chunking import (\n    _chunk_used_names,\n    _enrich_chunk_metadata,\n    _javascript_fallback_chunks,\n    _line_chunks,\n    _python_chunks,\n    _python_import_bindings,\n    _safe_relative_path,\n    _source_area,\n    _source_import_bindings,\n    _tree_sitter_chunks,\n    chunk_source,\n)\nfrom vulnerability_agent.retrieval.constants import (\n    CODE_SUFFIX_LANGUAGE,\n    DEFAULT_EMBEDDING_MODEL,\n    INDEX_METADATA_VERSION,\n    MAX_CHUNK_CHARS,\n    MAX_RETRIEVAL_RESULTS,\n    RRF_CONSTANT,\n    VECTOR_SIZE,\n)\nfrom vulnerability_agent.retrieval.index import LocalCodeRetriever\nfrom vulnerability_agent.retrieval.ranking import (\n    _package_evidence,\n    _package_ranked_ids,\n    _trace_locations,\n    bm25_rank,\n    reciprocal_rank_fusion,\n)\nfrom vulnerability_agent.retrieval.render import render_context\nfrom vulnerability_agent.retrieval.tokenization import _tokens\n\n__all__ = [\n    \"CODE_SUFFIX_LANGUAGE\",\n    \"DEFAULT_EMBEDDING_MODEL\",\n    \"INDEX_METADATA_VERSION\",\n    \"LocalCodeRetriever\",\n    \"MAX_CHUNK_CHARS\",\n    \"MAX_RETRIEVAL_RESULTS\",\n    \"RRF_CONSTANT\",\n    \"VECTOR_SIZE\",\n    \"_chunk_used_names\",\n    \"_enrich_chunk_metadata\",\n    \"_javascript_fallback_chunks\",\n    \"_line_chunks\",\n    \"_package_evidence\",\n    \"_package_ranked_ids\",\n    \"_python_chunks\",\n    \"_python_import_bindings\",\n    \"_safe_relative_path\",\n    \"_source_area\",\n    \"_source_import_bindings\",\n    \"_tokens\",\n    \"_trace_locations\",\n    \"_tree_sitter_chunks\",\n    \"bm25_rank\",\n    \"chunk_source\",\n    \"reciprocal_rank_fusion\",\n    \"render_context\",\n]",
+          "line_end": 70,
+          "line_start": 1,
+          "path": "vulnerability_agent/retrieval/__init__.py",
           "rank": 4,
           "relevant": false,
-          "symbol": "test_javascript_chunking_preserves_common_declaration_boundaries"
+          "symbol": "lines_1_70"
         },
         {
-          "content": "def _line_chunks(relative_path: str, source: str) -> list[dict[str, Any]]:\n    \"\"\"Bounded fallback for unsupported syntax or parser errors.\"\"\"\n    lines = source.splitlines()\n    result = []\n    start = 0\n    while start < len(lines):\n        end = min(start + 90, len(lines))\n        result.append({\n            \"path\": relative_path, \"symbol\": f\"lines_{start + 1}_{end}\",\n            \"line_start\": start + 1, \"line_end\": end,\n            \"language\": CODE_SUFFIX_LANGUAGE[Path(relative_path).suffix.lower()],\n            \"content\": \"\\n\".join(lines[start:end]),\n        })\n        start = end\n    return result",
-          "line_end": 190,
-          "line_start": 176,
-          "path": "vulnerability_agent/retrieval.py",
+          "content": "def chunk_source(\n    relative_path: str, source: str, *, parser_cache_dir: str | Path | None = None,\n) -> list[dict[str, Any]]:\n    \"\"\"Create safe, source-located chunks for Python and JS/TS files.\"\"\"\n    if not _safe_relative_path(relative_path) or not source.strip():\n        return []\n    suffix = Path(relative_path).suffix.lower()\n    if suffix == \".py\":\n        chunks = _python_chunks(relative_path, source)\n    else:\n        chunks = _tree_sitter_chunks(relative_path, source, parser_cache_dir)\n        if not chunks:\n            chunks = _javascript_fallback_chunks(relative_path, source)\n    return chunks or _line_chunks(relative_path, source)",
+          "line_end": 292,
+          "line_start": 279,
+          "path": "vulnerability_agent/retrieval/chunking.py",
           "rank": 5,
           "relevant": false,
-          "symbol": "_line_chunks"
+          "symbol": "chunk_source"
         }
       ],
       "returned_count": 5,
@@ -1097,9 +1095,9 @@
       "relevant_source_evidence_exists": true,
       "retrieved": [
         {
-          "content": "def main(argv: Sequence[str] | None = None) -> int:\n    parser = argparse.ArgumentParser(description=\"Collect or analyze evidence for a Dependabot pull request review.\")\n    parser.add_argument(\"repo\", nargs=\"?\", type=Path,\n                        help=\"Path to a local clone (required with --review-pr)\")\n    parser.add_argument(\"--report\", type=Path,\n                        help=\"Also save a copy of the JSON report at this path; every review is archived in ./saved report/\")\n    parser.add_argument(\"--state-db\", type=Path,\n                        help=\"SQLite database for MCP audit records\")\n    parser.add_argument(\"--review-pr\", metavar=\"URL_OR_NUMBER\",\n                        help=\"Collect evidence and review an open Dependabot pull request\")\n    parser.add_argument(\"--post-comment\", action=\"store_true\",\n                        help=\"Post or update the AI review as a comment on the reviewed PR\")\n    parser.add_argument(\"--collect-only\", action=\"store_true\",\n                        help=\"Collect tests/OSV/RAG evidence without an LLM call; for a secret-free CI job\")\n    parser.add_argument(\"--analyze-report\", type=Path, metavar=\"JSON\",\n                        help=\"Analyze a previously collected JSON report and optionally post its PR comment\")\n    parser.add_argument(\"--report-artifact-url\",\n                        help=\"GitHub Actions artifact URL to include in the report and PR comment\")\n    parser.add_argument(\"--expected-pr\", type=int,\n                        help=\"Expected PR number for validating a report before comment posting\")\n    parser.add_argument(\"--expected-repository\", metavar=\"OWNER/REPOSITORY\",\n                        help=\"Expected GitHub repository for validating a report before comment posting\")\n    parser.add_argument(\"--expected-head-sha\", metavar=\"SHA\",\n                        help=\"Expected PR head commit for validating a report before comment posting\")\n    args = parser.parse_args(argv)\n    load_dotenv()\n\n    tracing_enabled = os.getenv(\"LANGSMITH_TRACING\", \"false\").strip().lower() in {\"1\", \"true\", \"yes\", \"on\"}\n    if tracing_enabled and not os.getenv(\"LANGSMITH_API_KEY\"):\n        parser.error(\"LANGSMITH_TRACING is enabled but LANGSMITH_API_KEY is missing\")\n\n    repo = args.repo.expanduser().resolve() if args.repo else None\n    if not args.review_pr and not args.analyze_report:\n        parser.error(\"Specify --review-pr or --analyze-report\")\n    if args.post_comment and not (args.review_pr or args.analyze_report):\n        parser.error(\"--post-comment requires --review-pr or --analyze-report\")\n    if args.collect_only and not args.review_pr:\n        parser.error(\"--collect-only requires --review-pr\")\n    if args.report_artifact_url and not args.analyze_report:\n        parser.error(\"--report-artifact-url requires --analyze-report\")\n    if args.analyze_report and (repo is not None or args.review_pr or args.collect_only):\n        parser.error(\"--analyze-report cannot be combined with repo, --review-pr, or --collect-only\")\n    if args.post_comment and args.review_pr:\n        parser.error(\"For safer credential separation, collect evidence first, then use --analyze-report --post-comment\")\n    if args.review_pr and repo is None:\n        parser.error(\"repo is required with --review-pr\")\n    if repo is not None and (not repo.is_dir() or not (repo / \".git\").exists()):\n        parser.error(f\"Not a Git working tree: {repo}\")\n\n    if args.analyze_report:\n        try:\n            precollected_report = json.loads(args.analyze_report.expanduser().read_text(encoding=\"utf-8\"))\n            if not isinstance(precollected_report, dict) or precollected_report.get(\"mode\") != \"dependabot_pr_review\":\n                raise ValueError(\"The report is not a Dependabot PR review artifact\")\n            if args.report_artifact_url:\n                _validate_artifact_url(args.report_artifact_url, precollected_report)\n                precollected_report[\"report_artifact_url\"] = args.report_artifact_url\n            if args.post_comment:\n                _validate_comment_identity(args, precollected_report)\n        except (OSError, json.JSONDecodeError, ValueError) as exc:\n            parser.error(f\"Could not read Dependabot evidence report: {exc}\")\n    else:\n        precollected_report = None\n\n    def analyze_usage(head_repository: Path, findings: list[dict[str, Any]]) -> list[dict[str, Any]]:\n        \"\"\"Reuse report-only hybrid RAG on the exact PR snapshot.\"\"\"\n        if not findings:\n            return []\n        from vulnerability_agent.dependencies import create_dependencies\n        from vulnerability_agent.nodes.usage_analysis import node_report_source_usage\n\n        dependencies = create_dependencies(\n            audit_database_path=args.state_db,\n            run_id=f\"dependabot-review-{uuid.uuid4().hex}\",\n        )\n        analyses: list[dict[str, Any]] = []\n        for group in _group_source_analysis_inputs(findings):\n            result = node_report_source_usage({\n                \"repo_path\": str(head_repository), \"main_repo_path\": str(head_repository),\n                \"current_vuln\": group,\n            }, dependencies)\n            analyses.extend(result.get(\"usage_analysis\", []))\n        return analyses\n\n    started_at = datetime.now(timezone.utc)\n    automatic_report_path = DEFAULT_REPORT_DIRECTORY / (\n        f\"review-{started_at.strftime('%Y%m%dT%H%M%S.%fZ')}-{uuid.uuid4().hex[:8]}.json\"\n    )\n    requested_report_path = args.report.expanduser().resolve() if args.report else None\n    try:",
-          "line_end": 191,
-          "line_start": 102,
+          "content": "def main(argv: Sequence[str] | None = None) -> int:\n    parser = _build_parser()\n    args = parser.parse_args(argv)\n    load_dotenv()\n    tracing_enabled = _tracing_enabled(parser)\n    repo = args.repo.expanduser().resolve() if args.repo else None\n    _validate_args(parser, args, repo)\n    precollected_report = _load_precollected_report(parser, args)\n    analyze_usage = _make_usage_analyzer(args)\n\n    started_at = datetime.now(timezone.utc)\n    automatic_report_path = DEFAULT_REPORT_DIRECTORY / (\n        f\"review-{started_at.strftime('%Y%m%dT%H%M%S.%fZ')}-{uuid.uuid4().hex[:8]}.json\"\n    )\n    requested_report_path = args.report.expanduser().resolve() if args.report else None\n    try:\n        report = _run_review(args, repo, precollected_report, analyze_usage)\n    except Exception as exc:\n        report = {\n            \"schema_version\": 3, \"mode\": \"dependabot_pr_review\", \"status\": \"review_failed\",\n            \"repository\": str(repo or \"\"), \"pull_request_reference\": args.review_pr,\n            \"error\": f\"{type(exc).__name__}: {exc}\",\n            \"note\": \"Review-only workflow; no push, PR creation, merge, or comment was attempted.\",\n        }\n    report[\"observability\"] = {\n        \"langsmith_tracing\": \"enabled\" if tracing_enabled else \"disabled\",\n        \"langsmith_project\": os.getenv(\"LANGSMITH_PROJECT\", \"default\") if tracing_enabled else \"\",\n    }\n    rendered = json.dumps(report, indent=2, ensure_ascii=False)\n    if not _save_report_files(rendered, automatic_report_path, requested_report_path, \"Review report\"):\n        print(rendered)\n        return 1\n    print(rendered)\n    return 0 if report.get(\"status\") == \"review_complete\" else 1",
+          "line_end": 247,
+          "line_start": 214,
           "path": "main.py",
           "rank": 1,
           "relevant": true,
@@ -1124,22 +1122,22 @@
           "symbol": "_project_python"
         },
         {
-          "content": "def _safe_child_environment() -> dict[str, str]:\n    \"\"\"Reuse the test runner's allowlist for dependency installation too.\"\"\"\n    from sandbox_runner import SAFE_ENV_KEYS\n\n    environment = {key: os.environ[key] for key in SAFE_ENV_KEYS if key in os.environ}\n    environment[\"CI\"] = \"true\"\n    return environment",
-          "line_end": 1457,
-          "line_start": 1451,
-          "path": "vulnerability_agent/dependabot_review.py",
+          "content": "def _prepare_review_environment(repository: Path) -> dict[str, Any]:\n    \"\"\"Materialize the snapshot's declared dependency versions in its worktree.\"\"\"\n    if (repository / \"package-lock.json\").is_file() or (repository / \"npm-shrinkwrap.json\").is_file():\n        npm = shutil.which(\"npm\")\n        if not npm:\n            return {\"ready\": False, \"reason\": \"npm is not installed\", \"output\": \"Install Node.js/npm to run this PR's tests.\"}\n        return _setup_command(repository, [npm, \"ci\", \"--ignore-scripts\"])\n    if (repository / \"uv.lock\").is_file():\n        uv = shutil.which(\"uv\")\n        if not uv:\n            return {\"ready\": False, \"reason\": \"uv is not installed\", \"output\": \"Install uv to reproduce the uv.lock environment.\"}\n        return _setup_command(repository, [uv, \"sync\", \"--frozen\"])\n    if (repository / \"poetry.lock\").is_file():\n        poetry = shutil.which(\"poetry\")\n        if not poetry:\n            return {\"ready\": False, \"reason\": \"Poetry is not installed\", \"output\": \"Install Poetry to reproduce poetry.lock.\"}\n        environment = _safe_child_environment()\n        environment[\"POETRY_VIRTUALENVS_IN_PROJECT\"] = \"true\"\n        try:\n            result = subprocess.run(\n                [poetry, \"install\", \"--no-interaction\", \"--no-ansi\"], cwd=repository,\n                env=environment, capture_output=True, text=True, timeout=600, check=False,\n            )\n            return {\"ready\": result.returncode == 0, \"command\": [poetry, \"install\", \"--no-interaction\", \"--no-ansi\"],\n                    \"returncode\": result.returncode, \"output\": (result.stdout or \"\") + (result.stderr or \"\")}\n        except (OSError, subprocess.TimeoutExpired) as exc:\n            return {\"ready\": False, \"reason\": type(exc).__name__, \"output\": str(exc)}\n    requirements = repository / \"requirements.txt\"\n    if requirements.is_file():\n        setup = _setup_command(repository, [sys.executable, \"-m\", \"venv\", \".venv\"])\n        if not setup[\"ready\"]:\n            return setup\n        python = repository / \".venv\" / (\"Scripts/python.exe\" if os.name == \"nt\" else \"bin/python\")\n        setup = _setup_command(repository, [str(python), \"-m\", \"pip\", \"install\", \"-r\", \"requirements.txt\"])\n        if not setup[\"ready\"]:\n            return setup\n        return _setup_command(repository, [str(python), \"-m\", \"pip\", \"install\", \"pytest\"])\n    return {\n        \"ready\": False,\n        \"reason\": \"No supported lockfile or requirements.txt is available to reproduce this snapshot\",\n        \"output\": \"Tests were not run because the base and PR dependency environments could not be isolated.\",\n    }",
+          "line_end": 165,
+          "line_start": 124,
+          "path": "vulnerability_agent/dependabot/tests.py",
           "rank": 4,
           "relevant": false,
-          "symbol": "_safe_child_environment"
+          "symbol": "_prepare_review_environment"
         },
         {
-          "content": "def _prepare_review_environment(repository: Path) -> dict[str, Any]:\n    \"\"\"Materialize the snapshot's declared dependency versions in its worktree.\"\"\"\n    if (repository / \"package-lock.json\").is_file() or (repository / \"npm-shrinkwrap.json\").is_file():\n        npm = shutil.which(\"npm\")\n        if not npm:\n            return {\"ready\": False, \"reason\": \"npm is not installed\", \"output\": \"Install Node.js/npm to run this PR's tests.\"}\n        return _setup_command(repository, [npm, \"ci\", \"--ignore-scripts\"])\n    if (repository / \"uv.lock\").is_file():\n        uv = shutil.which(\"uv\")\n        if not uv:\n            return {\"ready\": False, \"reason\": \"uv is not installed\", \"output\": \"Install uv to reproduce the uv.lock environment.\"}\n        return _setup_command(repository, [uv, \"sync\", \"--frozen\"])\n    if (repository / \"poetry.lock\").is_file():\n        poetry = shutil.which(\"poetry\")\n        if not poetry:\n            return {\"ready\": False, \"reason\": \"Poetry is not installed\", \"output\": \"Install Poetry to reproduce poetry.lock.\"}\n        environment = _safe_child_environment()\n        environment[\"POETRY_VIRTUALENVS_IN_PROJECT\"] = \"true\"\n        try:\n            result = subprocess.run(\n                [poetry, \"install\", \"--no-interaction\", \"--no-ansi\"], cwd=repository,\n                env=environment, capture_output=True, text=True, timeout=600, check=False,\n            )\n            return {\"ready\": result.returncode == 0, \"command\": [poetry, \"install\", \"--no-interaction\", \"--no-ansi\"],\n                    \"returncode\": result.returncode, \"output\": (result.stdout or \"\") + (result.stderr or \"\")}\n        except (OSError, subprocess.TimeoutExpired) as exc:\n            return {\"ready\": False, \"reason\": type(exc).__name__, \"output\": str(exc)}\n    requirements = repository / \"requirements.txt\"\n    if requirements.is_file():\n        setup = _setup_command(repository, [sys.executable, \"-m\", \"venv\", \".venv\"])\n        if not setup[\"ready\"]:\n            return setup\n        python = repository / \".venv\" / (\"Scripts/python.exe\" if os.name == \"nt\" else \"bin/python\")\n        setup = _setup_command(repository, [str(python), \"-m\", \"pip\", \"install\", \"-r\", \"requirements.txt\"])\n        if not setup[\"ready\"]:\n            return setup\n        return _setup_command(repository, [str(python), \"-m\", \"pip\", \"install\", \"pytest\"])\n    return {\n        \"ready\": False,\n        \"reason\": \"No supported lockfile or requirements.txt is available to reproduce this snapshot\",\n        \"output\": \"Tests were not run because the base and PR dependency environments could not be isolated.\",\n    }",
-          "line_end": 1518,
-          "line_start": 1477,
-          "path": "vulnerability_agent/dependabot_review.py",
+          "content": "def _safe_child_environment() -> dict[str, str]:\n    \"\"\"Reuse the test runner's allowlist for dependency installation too.\"\"\"\n    environment = {key: os.environ[key] for key in SAFE_ENV_KEYS if key in os.environ}\n    environment[\"CI\"] = \"true\"\n    return environment",
+          "line_end": 89,
+          "line_start": 85,
+          "path": "vulnerability_agent/dependabot/tests.py",
           "rank": 5,
           "relevant": false,
-          "symbol": "_prepare_review_environment"
+          "symbol": "_safe_child_environment"
         }
       ],
       "returned_count": 5,
@@ -1151,7 +1149,7 @@
       "configuration_references": [],
       "dependency": "tomli",
       "expected_evidence_classification": "direct_import",
-      "expected_relevant_count": 4,
+      "expected_relevant_count": 3,
       "expected_relevant_locations": [
         {
           "evidence_classification": "direct_import",
@@ -1161,15 +1159,9 @@
         },
         {
           "evidence_classification": "direct_import",
-          "path": "vulnerability_agent/dependabot_review.py",
+          "path": "vulnerability_agent/dependabot/inventory.py",
           "required_text": "import tomli as tomllib",
-          "symbol": "_direct_dependency_names"
-        },
-        {
-          "evidence_classification": "direct_import",
-          "path": "vulnerability_agent/dependabot_review.py",
-          "required_text": "import tomli as tomllib",
-          "symbol": "_dependency_index"
+          "symbol": "_load_toml"
         },
         {
           "evidence_classification": "direct_import",
@@ -1180,66 +1172,65 @@
       ],
       "expected_source_evidence_classification": "direct_import",
       "id": "tomli-aliased-import",
-      "matched_relevant_location_count": 4,
+      "matched_relevant_location_count": 3,
       "no_evidence_false_positive_results": null,
-      "non_relevant_results_at_5": 1,
-      "precision_at_5": 0.8,
+      "non_relevant_results_at_5": 2,
+      "precision_at_5": 0.6,
       "query": "tomli as tomllib compatibility TOML parser dependency declarations",
       "recall_at_5": 1.0,
       "reciprocal_rank": 1.0,
       "relevant_ranks": [
         1,
         2,
-        3,
-        4
+        3
       ],
-      "relevant_retrieved_count": 4,
+      "relevant_retrieved_count": 3,
       "relevant_source_evidence_exists": true,
       "retrieved": [
         {
-          "content": "def parse_python_lock(content: str) -> list[dict[str, str]]:\n    \"\"\"Read resolved package records from uv.lock or poetry.lock TOML.\"\"\"\n    try:\n        import tomllib\n    except ImportError:  # Python 3.10\n        import tomli as tomllib  # type: ignore[no-redef]\n    data = tomllib.loads(content)\n    result: list[dict[str, str]] = []\n    for package in data.get(\"package\", data.get(\"packages\", [])):\n        name, version = package.get(\"name\"), package.get(\"version\")\n        if name and version:\n            result.append({\"name\": str(name), \"version\": str(version), \"ecosystem\": \"PyPI\"})\n    return result",
-          "line_end": 361,
-          "line_start": 349,
-          "path": "osv_service.py",
+          "content": "def _load_toml(path: Path) -> dict[str, Any] | None:\n    try:\n        import tomllib\n    except ImportError:  # Python 3.10\n        import tomli as tomllib  # type: ignore[no-redef]\n    try:\n        return tomllib.loads(path.read_text(encoding=\"utf-8\"))\n    except (OSError, ValueError, TypeError):\n        return None",
+          "line_end": 29,
+          "line_start": 21,
+          "path": "vulnerability_agent/dependabot/inventory.py",
           "rank": 1,
+          "relevant": true,
+          "symbol": "_load_toml"
+        },
+        {
+          "content": "def parse_python_lock(content: str) -> list[dict[str, str]]:\n    \"\"\"Read resolved package records from uv.lock or poetry.lock TOML.\"\"\"\n    try:\n        import tomllib\n    except ImportError:  # Python 3.10\n        import tomli as tomllib  # type: ignore[no-redef]\n    data = tomllib.loads(content)\n    result: list[dict[str, str]] = []\n    for package in data.get(\"package\", data.get(\"packages\", [])):\n        name, version = package.get(\"name\"), package.get(\"version\")\n        if name and version:\n            result.append({\"name\": str(name), \"version\": str(version), \"ecosystem\": \"PyPI\"})\n    return result",
+          "line_end": 366,
+          "line_start": 354,
+          "path": "osv_service.py",
+          "rank": 2,
           "relevant": true,
           "symbol": "parse_python_lock"
         },
         {
-          "content": "def _direct_dependency_names(repository: Path) -> set[tuple[str, str]]:\n    \"\"\"Identify top-level declarations; lock-only packages are transitive clues.\"\"\"\n    direct: set[tuple[str, str]] = set()\n    requirements = repository / \"requirements.txt\"\n    if requirements.is_file():\n        direct.update((\"pypi\", item[\"name\"].casefold().replace(\"_\", \"-\").replace(\".\", \"-\"))\n                      for item in parse_requirements(requirements.read_text(encoding=\"utf-8\")))\n    pyproject = repository / \"pyproject.toml\"\n    if pyproject.is_file():\n        try:\n            import tomllib\n        except ImportError:  # Python 3.10\n            import tomli as tomllib  # type: ignore[no-redef]\n        try:\n            data = tomllib.loads(pyproject.read_text(encoding=\"utf-8\"))\n            poetry_deps = data.get(\"tool\", {}).get(\"poetry\", {}).get(\"dependencies\", {})\n            direct.update((\"pypi\", str(name).casefold().replace(\"_\", \"-\").replace(\".\", \"-\"))\n                          for name in poetry_deps if str(name).casefold() != \"python\")\n            for group in data.get(\"tool\", {}).get(\"poetry\", {}).get(\"group\", {}).values():\n                dependencies = group.get(\"dependencies\", {}) if isinstance(group, dict) else {}\n                direct.update((\"pypi\", str(name).casefold().replace(\"_\", \"-\").replace(\".\", \"-\"))\n                              for name in dependencies)\n            for requirement in data.get(\"project\", {}).get(\"dependencies\", []) or []:\n                match = re.match(r\"\\s*([A-Za-z0-9_.-]+)\", str(requirement))\n                if match:\n                    direct.add((\"pypi\", match.group(1).casefold().replace(\"_\", \"-\").replace(\".\", \"-\")))\n            for requirements_group in data.get(\"project\", {}).get(\"optional-dependencies\", {}).values():\n                for requirement in requirements_group or []:\n                    match = re.match(r\"\\s*([A-Za-z0-9_.-]+)\", str(requirement))\n                    if match:\n                        direct.add((\"pypi\", match.group(1).casefold().replace(\"_\", \"-\").replace(\".\", \"-\")))\n        except (OSError, ValueError):\n            pass\n    package_json = repository / \"package.json\"\n    if package_json.is_file():\n        import json\n        try:\n            data = json.loads(package_json.read_text(encoding=\"utf-8\"))\n            for section in (\"dependencies\", \"devDependencies\", \"optionalDependencies\", \"peerDependencies\"):\n                direct.update((\"npm\", str(name).casefold()) for name in (data.get(section) or {}))\n        except (OSError, ValueError):\n            pass\n    return direct",
-          "line_end": 446,
-          "line_start": 404,
-          "path": "vulnerability_agent/dependabot_review.py",
-          "rank": 2,
-          "relevant": true,
-          "symbol": "_direct_dependency_names"
-        },
-        {
           "content": "def poetry_declared_constraint(content: str, package_name: str) -> Any | None:\n    \"\"\"Find a package constraint in Poetry or PEP 621 project dependency tables.\"\"\"\n    try:\n        import tomllib\n    except ImportError:  # Python 3.10\n        import tomli as tomllib  # type: ignore[no-redef]\n    try:\n        data = tomllib.loads(content)\n    except (ValueError, TypeError) as exc:\n        raise ValueError(f\"Cannot parse pyproject.toml for dependency verification: {exc}\") from exc\n    wanted = _normalized_package_name(package_name, \"pypi\")\n    tool = data.get(\"tool\", {}).get(\"poetry\", {})\n    tables = [tool.get(\"dependencies\", {})]\n    tables.extend(\n        group.get(\"dependencies\", {})\n        for group in (tool.get(\"group\", {}) or {}).values()\n        if isinstance(group, dict)\n    )\n    for dependencies in tables:\n        for name, constraint in (dependencies or {}).items():\n            if _normalized_package_name(str(name), \"pypi\") == wanted:\n                return constraint\n    project = data.get(\"project\", {})\n    requirements = list(project.get(\"dependencies\", []) or [])\n    for optional in (project.get(\"optional-dependencies\", {}) or {}).values():\n        requirements.extend(optional or [])\n    for raw_requirement in requirements:\n        try:\n            requirement = Requirement(str(raw_requirement))\n        except InvalidRequirement:\n            continue\n        if _normalized_package_name(requirement.name, \"pypi\") == wanted:\n            return str(requirement.specifier) or \"*\"\n    return None",
-          "line_end": 274,
-          "line_start": 241,
+          "line_end": 279,
+          "line_start": 246,
           "path": "osv_service.py",
           "rank": 3,
           "relevant": true,
           "symbol": "poetry_declared_constraint"
         },
         {
-          "content": "def _dependency_index(repository: Path) -> tuple[set[tuple[str, str]], dict[tuple[str, str], set[tuple[str, str]]]]:\n    \"\"\"Read direct roots and dependency edges from common manifests/lockfiles.\"\"\"\n    roots = _direct_dependency_names(repository)\n    edges: dict[tuple[str, str], set[tuple[str, str]]] = {}\n\n    def normalize(ecosystem: str, name: Any) -> tuple[str, str]:\n        value = str(name).casefold()\n        if ecosystem == \"pypi\":\n            value = value.replace(\"_\", \"-\").replace(\".\", \"-\")\n        return ecosystem, value\n\n    python_lock = next((repository / name for name in (\"uv.lock\", \"poetry.lock\") if (repository / name).is_file()), None)\n    if python_lock:\n        try:\n            import tomllib\n        except ImportError:  # Python 3.10\n            import tomli as tomllib  # type: ignore[no-redef]\n        try:\n            data = tomllib.loads(python_lock.read_text(encoding=\"utf-8\"))\n            packages = data.get(\"package\", data.get(\"packages\", []))\n            for package in packages:\n                parent_name = package.get(\"name\")\n                if not parent_name:\n                    continue\n                parent = normalize(\"pypi\", parent_name)\n                dependencies = package.get(\"dependencies\", {})\n                if isinstance(dependencies, dict):\n                    dependency_names = dependencies.keys()\n                elif isinstance(dependencies, list):\n                    dependency_names = [entry.get(\"name\") for entry in dependencies if isinstance(entry, dict)]\n                else:\n                    dependency_names = []\n                for dependency_name in dependency_names:\n                    if dependency_name:\n                        edges.setdefault(parent, set()).add(normalize(\"pypi\", dependency_name))\n        except (OSError, ValueError, TypeError):\n            pass\n\n    npm_lock = next((repository / name for name in (\"npm-shrinkwrap.json\", \"package-lock.json\") if (repository / name).is_file()), None)\n    if npm_lock:\n        import json\n        try:\n            data = json.loads(npm_lock.read_text(encoding=\"utf-8\"))\n            package_records = data.get(\"packages\") or {}\n            for lock_path, package in package_records.items():\n                if not isinstance(package, dict):\n                    continue\n                if lock_path:\n                    parts = lock_path.split(\"node_modules/\")\n                    parent_name = parts[-1].strip(\"/\") if len(parts) > 1 else package.get(\"name\")\n                else:\n                    parent_name = \"__root__\"\n                parent = normalize(\"npm\", parent_name) if parent_name else None\n                if parent is None:\n                    continue\n                for section in (\"dependencies\", \"optionalDependencies\", \"peerDependencies\"):\n                    for dependency_name in (package.get(section) or {}):\n                        edges.setdefault(parent, set()).add(normalize(\"npm\", dependency_name))\n        except (OSError, ValueError, TypeError):\n            pass\n\n    return roots, edges",
-          "line_end": 510,
-          "line_start": 449,
-          "path": "vulnerability_agent/dependabot_review.py",
+          "content": "def _tree_sitter_chunks(\n    relative_path: str, source: str, parser_cache_dir: str | Path | None = None,\n) -> list[dict[str, Any]]:\n    \"\"\"Extract JS/TS declarations with Tree-sitter when available.\"\"\"\n    try:\n        from tree_sitter_language_pack import PackConfig, configure, get_parser\n\n        cache_dir = Path(parser_cache_dir or (Path.home() / \".vulnerability-patch-agent\" / \"code-index\" / \"tree-sitter\"))\n        cache_dir.mkdir(parents=True, exist_ok=True, mode=0o700)\n        configure(PackConfig(cache_dir=str(cache_dir)))\n\n        language = CODE_SUFFIX_LANGUAGE[Path(relative_path).suffix.lower()]\n        parser = get_parser(language)\n        tree = parser.parse(source.encode(\"utf-8\"))\n    except Exception:\n        return []\n    lines = source.splitlines()\n    declaration_types = {\n        \"function_declaration\", \"function_expression\", \"generator_function_declaration\",\n        \"method_definition\", \"class_declaration\", \"class\", \"lexical_declaration\",\n    }\n    chunks: list[dict[str, Any]] = []\n\n    def visit(node: Any, parent_symbol: str = \"\") -> None:\n        if node.type in declaration_types:\n            start, end = int(node.start_point.row) + 1, int(node.end_point.row) + 1\n            text = \"\\n\".join(lines[start - 1:end])\n            name_node = node.child_by_field_name(\"name\")\n            name = source[name_node.start_byte:name_node.end_byte] if name_node else node.type\n            symbol = f\"{parent_symbol}.{name}\" if parent_symbol else name\n            if len(text) <= MAX_CHUNK_CHARS:\n                chunks.append({\n                    \"path\": relative_path, \"symbol\": symbol,\n                    \"line_start\": start, \"line_end\": end,\n                    \"language\": CODE_SUFFIX_LANGUAGE[Path(relative_path).suffix.lower()],\n                    \"content\": text,\n                })\n                # For a declaration, only recurse into nested declarations so\n                # methods are independently retrievable without indexing every\n                # expression as a separate chunk.\n                for child in node.children:\n                    visit(child, symbol if node.type in {\"class\", \"class_declaration\"} else parent_symbol)\n                return\n        for child in node.children:\n            visit(child, parent_symbol)\n\n    visit(tree.root_node)\n    return chunks",
+          "line_end": 143,
+          "line_start": 96,
+          "path": "vulnerability_agent/retrieval/chunking.py",
           "rank": 4,
-          "relevant": true,
-          "symbol": "_dependency_index"
+          "relevant": false,
+          "symbol": "_tree_sitter_chunks"
         },
         {
-          "content": "def _dependency_changes(base_root: Path, head_root: Path, base_scan: dict[str, Any], head_scan: dict[str, Any]) -> list[dict[str, Any]]:\n    \"\"\"Compare resolved inventories and label packages declared at the top level.\"\"\"\n    def inventory(scan: dict[str, Any]) -> dict[tuple[str, str], str]:\n        result: dict[tuple[str, str], str] = {}\n        for item in scan.get(\"resolved_packages\", []):\n            ecosystem = str(item.get(\"ecosystem\", \"\")).casefold()\n            name = str(item.get(\"name\", \"\")).casefold()\n            if ecosystem == \"pypi\":\n                name = name.replace(\"_\", \"-\").replace(\".\", \"-\")\n            result[(ecosystem, name)] = str(item.get(\"version\", \"\"))\n        return result\n\n    before, after = inventory(base_scan), inventory(head_scan)\n    base_roots, base_edges = _dependency_index(base_root)\n    head_roots, head_edges = _dependency_index(head_root)\n    direct = base_roots | head_roots\n    edges = {parent: set(children) for parent, children in base_edges.items()}\n    for parent, children in head_edges.items():\n        edges.setdefault(parent, set()).update(children)\n    changes: list[dict[str, Any]] = []\n\n    def constraints_for(target_name: str, paths: list[list[str]], target_is_direct: bool) -> tuple[list[dict[str, str]], str]:\n        \"\"\"Collect constraints imposed by direct declarations and lockfile parents.\"\"\"\n        constraints: dict[tuple[str, str], dict[str, str]] = {}\n        expected_parents = {path[-2] for path in paths if len(path) > 1}\n        missing_parents = set(expected_parents)\n        lock = next((head_root / name for name in (\"poetry.lock\", \"uv.lock\") if (head_root / name).is_file()), None)\n        if lock:\n            try:\n                import tomllib\n                lock_data = tomllib.loads(lock.read_text(encoding=\"utf-8\"))\n                packages = lock_data.get(\"package\", lock_data.get(\"packages\", []))\n                by_parent = {str(p.get(\"name\", \"\")).casefold().replace(\"_\", \"-\").replace(\".\", \"-\"): p\n                             for p in packages if isinstance(p, dict)}\n                parents = {path[-2] for path in paths if len(path) > 1}\n                for parent_name in parents:\n                    parent = by_parent.get(parent_name.casefold().replace(\"_\", \"-\").replace(\".\", \"-\"))\n                    dependencies = parent.get(\"dependencies\", {}) if parent else {}\n                    entries = dependencies.items() if isinstance(dependencies, dict) else (\n                        (entry.get(\"name\"), entry) for entry in dependencies if isinstance(entry, dict)\n                    ) if isinstance(dependencies, list) else ()\n                    for dep_name, raw in entries:\n                        normalized = str(dep_name).casefold().replace(\"_\", \"-\").replace(\".\", \"-\")\n                        if normalized == target_name:\n                            value = raw.get(\"version\", \"*\") if isinstance(raw, dict) else raw\n                            constraints[(parent_name, str(value or \"*\"))] = {\n                                \"parent\": parent_name, \"constraint\": str(value or \"*\"), \"source\": lock.name,\n                            }\n                            missing_parents.discard(parent_name)\n            except (OSError, ValueError, TypeError):\n                pass\n        if target_is_direct and (head_root / \"pyproject.toml\").is_file():\n            try:\n                declared = poetry_declared_constraint((head_root / \"pyproject.toml\").read_text(encoding=\"utf-8\"), target_name)\n                if declared is not None:\n                    constraints[(\"project\", str(declared))] = {\n                        \"parent\": \"project\", \"constraint\": str(declared), \"source\": \"pyproject.toml\",\n                    }\n            except (OSError, ValueError):\n                pass\n        values = [constraints[key] for key in sorted(constraints)]\n        complete = bool(values) and not missing_parents and (not target_is_direct or any(item[\"parent\"] == \"project\" for item in values))\n        return values, \"complete\" if complete else (\"partial\" if values else \"unavailable\")\n\n    for ecosystem, name in sorted(before.keys() | after.keys()):\n        old, new = before.get((ecosystem, name), \"\"), after.get((ecosystem, name), \"\")\n        if old == new:\n            continue\n        target = (ecosystem, name)\n        paths = _dependency_paths(direct, edges, target)\n        relationship = \"direct\" if target in direct else (\"transitive\" if paths else \"unknown\")\n        upgrade_constraints, constraints_status = constraints_for(name, paths, target in head_roots)\n        changes.append({\n            \"package\": name,\n            \"ecosystem\": ecosystem,\n            \"base_version\": old or \"not present\",\n            \"head_version\": new or \"removed\",\n            \"relationship\": relationship,\n            \"dependency_paths\": paths,\n            \"upgrade_constraints\": upgrade_constraints,\n            \"upgrade_constraints_status\": constraints_status,\n        })\n    return changes",
-          "line_end": 617,
-          "line_start": 535,
-          "path": "vulnerability_agent/dependabot_review.py",
+          "content": "def direct_dependency_names(repository: Path) -> set[tuple[str, str]]:\n    \"\"\"Identify top-level declarations; lock-only packages are transitive clues.\"\"\"\n    direct: set[tuple[str, str]] = set()\n    requirements = repository / \"requirements.txt\"\n    if requirements.is_file():\n        direct.update(\n            (\"pypi\", normalize_package_name(item[\"name\"], \"pypi\"))\n            for item in parse_requirements(requirements.read_text(encoding=\"utf-8\"))\n        )\n    pyproject = repository / \"pyproject.toml\"\n    if pyproject.is_file():\n        data = _load_toml(pyproject) or {}\n        poetry_deps = data.get(\"tool\", {}).get(\"poetry\", {}).get(\"dependencies\", {})\n        direct.update(\n            (\"pypi\", normalize_package_name(name, \"pypi\"))\n            for name in poetry_deps if str(name).casefold() != \"python\"\n        )\n        for group in data.get(\"tool\", {}).get(\"poetry\", {}).get(\"group\", {}).values():\n            dependencies = group.get(\"dependencies\", {}) if isinstance(group, dict) else {}\n            direct.update((\"pypi\", normalize_package_name(name, \"pypi\")) for name in dependencies)\n        for requirement in data.get(\"project\", {}).get(\"dependencies\", []) or []:\n            match = re.match(r\"\\s*([A-Za-z0-9_.-]+)\", str(requirement))\n            if match:\n                direct.add((\"pypi\", normalize_package_name(match.group(1), \"pypi\")))\n        for requirements_group in data.get(\"project\", {}).get(\"optional-dependencies\", {}).values():\n            for requirement in requirements_group or []:\n                match = re.match(r\"\\s*([A-Za-z0-9_.-]+)\", str(requirement))\n                if match:\n                    direct.add((\"pypi\", normalize_package_name(match.group(1), \"pypi\")))\n    package_json = repository / \"package.json\"\n    if package_json.is_file():\n        try:\n            data = json.loads(package_json.read_text(encoding=\"utf-8\"))\n            for section in (\"dependencies\", \"devDependencies\", \"optionalDependencies\", \"peerDependencies\"):\n                direct.update((\"npm\", str(name).casefold()) for name in (data.get(section) or {}))\n        except (OSError, ValueError):\n            pass\n    return direct",
+          "line_end": 119,
+          "line_start": 82,
+          "path": "vulnerability_agent/dependabot/inventory.py",
           "rank": 5,
           "relevant": false,
-          "symbol": "_dependency_changes"
+          "symbol": "direct_dependency_names"
         }
       ],
       "returned_count": 5,
@@ -1333,13 +1324,13 @@
           "symbol": "test_proxy_batches_safe_files_but_rejects_secret_paths"
         },
         {
-          "content": "def test_cli_rejects_collected_report_for_different_pr(tmp_path):\n    evidence = tmp_path / \"evidence.json\"\n    evidence.write_text(json.dumps(_complete_report()))\n\n    with pytest.raises(SystemExit) as error:\n        main.main([\n            \"--analyze-report\", str(evidence), \"--post-comment\",\n            \"--expected-pr\", \"18\", \"--expected-repository\", \"acme/demo\", \"--expected-head-sha\", \"abc123\",\n        ])\n\n    assert error.value.code == 2",
-          "line_end": 109,
-          "line_start": 99,
+          "content": "def test_cli_exposes_only_dependabot_review_commands(capsys):\n    with pytest.raises(SystemExit) as help_exit:\n        main.main([\"--help\"])\n    assert help_exit.value.code == 0\n    help_text = capsys.readouterr().out\n    assert \"--review-pr\" in help_text\n    assert \"--analyze-report\" in help_text\n    assert \"--approve\" not in help_text\n    assert \"--resume\" not in help_text\n\n    with pytest.raises(SystemExit) as removed_command:\n        main.main([\"--approve\"])\n    assert removed_command.value.code == 2",
+          "line_end": 124,
+          "line_start": 112,
           "path": "tests/test_main.py",
           "rank": 5,
           "relevant": false,
-          "symbol": "test_cli_rejects_collected_report_for_different_pr"
+          "symbol": "test_cli_exposes_only_dependabot_review_commands"
         }
       ],
       "returned_count": 5,
@@ -1401,31 +1392,31 @@
           "symbol": "test_scan_packages_attaches_package_to_vulnerability"
         },
         {
-          "content": "def test_package_import_mapping_includes_nonmatching_distribution_names():\n    assert \"git\" in distribution_import_modules(\"GitPython\")\n    assert \"dotenv\" in distribution_import_modules(\"python-dotenv\")\n    assert \"PIL\" in distribution_import_modules(\"Pillow\")\n    assert \"dotenv\" in package_search_terms(\"python-dotenv\")\n    assert \"pytest\" in distribution_import_modules(\"pytest-asyncio\")",
-          "line_end": 161,
-          "line_start": 156,
+          "content": "def test_retrieval_embeds_the_query_once_and_issues_one_dense_query(tmp_path):\n    \"\"\"Bound retrieval work by call count instead of wall-clock timing.\"\"\"\n    pytest.importorskip(\"qdrant_client\")\n    from qdrant_client import QdrantClient\n\n    repository = tmp_path / \"demo-repo\"\n    repository.mkdir()\n    storage = tmp_path / \"qdrant\"\n    sources = {\n        \"src/client.py\": \"import requests\\ndef fetch_data(url):\\n    return requests.get(url)\\n\",\n        \"tests/test_client.py\": \"def test_fetch():\\n    assert True\\n\",\n    }\n    embedder = CountingEmbedder()\n    client = CountingClient(QdrantClient(path=str(storage)))\n    retriever = LocalCodeRetriever(storage, client=client, embedder=embedder)\n    retriever.index_sources(repository, sources)\n    embedder.batches.clear()\n    client.query_points_calls = 0\n    client.upsert_calls = 0\n\n    retriever.retrieve(repository, \"requests fetch_data\", limit=3)\n    retriever.client.close()\n\n    assert embedder.batches == [[\"requests fetch_data\"]]\n    assert client.query_points_calls == 1\n    assert client.upsert_calls == 0",
+          "line_end": 355,
+          "line_start": 330,
           "path": "tests/test_retrieval.py",
           "rank": 3,
           "relevant": false,
-          "symbol": "test_package_import_mapping_includes_nonmatching_distribution_names"
+          "symbol": "test_retrieval_embeds_the_query_once_and_issues_one_dense_query"
         },
         {
           "content": "def test_test_comparison_marks_missing_pytest_as_unavailable_not_failure():\n    comparison = review._compare_tests(\n        {\"passed\": False, \"returncode\": 1, \"output\": \"/tmp/base/python: No module named pytest\"},\n        {\"passed\": False, \"returncode\": 1, \"output\": \"/tmp/pr/python: No module named pytest\"},\n    )\n    assert comparison[\"classification\"] == \"test_environment_unavailable\"\n    assert \"not evidence of a project test failure\" in comparison[\"note\"]",
-          "line_end": 123,
-          "line_start": 117,
-          "path": "tests/test_dependabot_review.py",
+          "line_end": 126,
+          "line_start": 120,
+          "path": "tests/test_dependabot_review_core.py",
           "rank": 4,
           "relevant": false,
           "symbol": "test_test_comparison_marks_missing_pytest_as_unavailable_not_failure"
         },
         {
-          "content": "@pytest.mark.parametrize((\"osv_results\", \"source_fails\", \"release_fails\"), [\n    ([{\"scan_status\": \"complete\", \"findings\": [], \"unresolved_packages\": []},\n      {\"scan_status\": \"complete\", \"findings\": [], \"unresolved_packages\": []}], False, False),\n    ([RuntimeError(\"OSV offline\"), {\"scan_status\": \"complete\", \"findings\": [], \"unresolved_packages\": []}], False, False),\n    ([{\"scan_status\": \"complete\", \"findings\": [{\"id\": \"GHSA-one\", \"package\": \"demo\", \"ecosystem\": \"PyPI\", \"version\": \"1\"}], \"unresolved_packages\": []},\n      {\"scan_status\": \"complete\", \"findings\": [{\"id\": \"GHSA-one\", \"package\": \"demo\", \"ecosystem\": \"PyPI\", \"version\": \"2\"}], \"unresolved_packages\": []}], True, False),\n    ([{\"scan_status\": \"complete\", \"findings\": [\n          {\"id\": f\"GHSA-{index}\", \"package\": \"demo\", \"ecosystem\": \"PyPI\", \"version\": \"1\"} for index in range(14)\n      ], \"unresolved_packages\": []},\n      {\"scan_status\": \"complete\", \"findings\": [\n          {\"id\": f\"GHSA-{index}\", \"package\": \"demo\", \"ecosystem\": \"PyPI\", \"version\": \"2\"} for index in range(12)\n      ], \"unresolved_packages\": []}], False, False),\n    ([{\"scan_status\": \"complete\", \"findings\": [{\"id\": \"GHSA-release\", \"package\": \"demo\", \"ecosystem\": \"PyPI\", \"version\": \"1\"}], \"unresolved_packages\": []},\n      {\"scan_status\": \"complete\", \"findings\": [{\"id\": \"GHSA-release\", \"package\": \"demo\", \"ecosystem\": \"PyPI\", \"version\": \"2\"}], \"unresolved_packages\": []}], False, True),\n])\ndef test_source_analysis_runs_independently_of_osv_and_preserves_other_results(tmp_path, monkeypatch, osv_results, source_fails, release_fails):\n    repository = tmp_path / \"repo\"\n    repository.mkdir()\n    (repository / \".git\").mkdir()\n    response = Mock()\n    response.json.return_value = {\n        \"state\": \"open\", \"user\": {\"login\": \"dependabot[bot]\"}, \"html_url\": \"\", \"title\": \"Bump demo\",\n        \"base\": {\"ref\": \"main\", \"sha\": \"base\"}, \"head\": {\"ref\": \"dependabot/demo\", \"sha\": \"head\"},\n        \"changed_files\": 1,\n    }\n    files = Mock()\n    files.json.return_value = [{\"filename\": \"requirements.txt\", \"status\": \"modified\", \"patch\": \"\"}]\n    github = Mock()\n    github.get.side_effect = [response, files]\n    scans = iter(osv_results)\n    analyzed = []\n\n    def fake_git(root, *args):\n        if args[:3] == (\"remote\", \"get-url\", \"origin\"):\n            return \"https://github.com/acme/demo.git\"\n        if args[0] == \"rev-parse\":\n            return {\"refs/agent-review/2/base\": \"base\", \"refs/agent-review/2/head\": \"head\"}[args[1]]\n        if args[:2] == (\"worktree\", \"add\"):\n            Path(args[-2]).mkdir(parents=True, exist_ok=True)\n        return \"\"\n\n    def scan(_root, _client):\n        result = next(scans)\n        if isinstance(result, Exception):\n            raise result\n        return result\n\n    monkeypatch.setattr(review, \"_git\", fake_git)\n    monkeypatch.setattr(review, \"_test\", lambda *_: {\"passed\": True, \"returncode\": 0, \"output\": \"passed\"})\n    monkeypatch.setattr(review, \"_scan\", scan)\n    monkeypatch.setattr(review, \"_dependency_changes\", lambda *_: [\n        {\"package\": name, \"ecosystem\": \"pypi\", \"base_version\": \"1\", \"head_version\": \"2\",\n         \"relationship\": \"direct\", \"dependency_paths\": [[name]]}\n        for name in (\"demo\", \"other\")\n    ])\n\n    def source_analysis(_root, inputs):\n        analyzed.extend(inputs)\n        if source_fails:\n            raise RuntimeError(\"source analysis unavailable\")\n        return [{\"package\": \"demo\", \"ecosystem\": \"pypi\", \"locations\": []}]\n\n    def release_lookup(_changes):\n        if release_fails:\n            raise RuntimeError(\"release endpoint unavailable\")\n        return []\n\n    result = review.review_dependabot_pull_request(\n        repository, \"2\", github_client=github, usage_analyzer=source_analysis,\n        release_context_lookup=release_lookup,\n    )\n    assert any((item.get(\"package\", {}).get(\"name\") if isinstance(item.get(\"package\"), dict) else item.get(\"package\")) == \"demo\"\n               for item in analyzed)\n    analyzed_names = {\n        item.get(\"package\", {}).get(\"name\") if isinstance(item.get(\"package\"), dict) else item.get(\"package\")\n        for item in analyzed\n    }\n    assert analyzed_names == {\"demo\", \"other\"}\n    supplied_advisory_ids = {str(item.get(\"id\")) for item in analyzed if not str(item.get(\"id\", \"\")).startswith(\"source-analysis:\")}\n    expected_pr_advisory_ids = {str(item[\"id\"]) for item in osv_results[1][\"findings\"]} if not isinstance(osv_results[1], Exception) else set()\n    assert supplied_advisory_ids == expected_pr_advisory_ids\n    expected_source_status = \"failed\" if source_fails else \"completed_without_matches\"\n    assert result[\"summary\"][\"dependency_analyses\"][0][\"source_analysis_status\"] == expected_source_status\n    assert result[\"summary\"][\"dependency_analyses\"][1][\"source_analysis_status\"] == expected_source_status\n    if isinstance(osv_results[0], Exception):\n        assert result[\"osv_scans\"][\"base\"][\"status\"] == \"failed\"\n        assert result[\"summary\"][\"dependency_analyses\"][0][\"osv_status\"] == \"failed\"\n    if source_fails:\n        assert result[\"summary\"][\"osv\"][\"remaining\"] == 1\n        assert result[\"osv_scans\"][\"base\"][\"status\"] == \"complete\"",
-          "line_end": 508,
-          "line_start": 419,
-          "path": "tests/test_dependabot_review.py",
+          "content": "def test_package_import_mapping_includes_nonmatching_distribution_names():\n    assert \"git\" in distribution_import_modules(\"GitPython\")\n    assert \"dotenv\" in distribution_import_modules(\"python-dotenv\")\n    assert \"PIL\" in distribution_import_modules(\"Pillow\")\n    assert \"dotenv\" in package_search_terms(\"python-dotenv\")\n    assert \"pytest\" in distribution_import_modules(\"pytest-asyncio\")",
+          "line_end": 161,
+          "line_start": 156,
+          "path": "tests/test_retrieval.py",
           "rank": 5,
           "relevant": false,
-          "symbol": "test_source_analysis_runs_independently_of_osv_and_preserves_other_results"
+          "symbol": "test_package_import_mapping_includes_nonmatching_distribution_names"
         }
       ],
       "returned_count": 5,
@@ -1441,7 +1432,7 @@
       "expected_relevant_locations": [
         {
           "evidence_classification": "test_only",
-          "path": "tests/test_dependabot_review.py",
+          "path": "tests/test_dependabot_review_core.py",
           "required_text": "httpx.Response(403",
           "symbol": "test_release_lookup_status_is_explicit_and_machine_readable"
         }
@@ -1462,19 +1453,19 @@
       "relevant_source_evidence_exists": true,
       "retrieved": [
         {
-          "content": "@pytest.mark.parametrize((\"release_status\", \"body\", \"expected\"), [\n    (200, \"Release notes\", \"retrieved\"),\n    (200, \"\", \"no_release_notes\"),\n    (404, \"\", \"no_release_notes\"),\n    (403, \"\", \"lookup_failed\"),\n])\ndef test_release_lookup_status_is_explicit_and_machine_readable(monkeypatch, release_status, body, expected):\n    registry = Mock()\n    registry.status_code = 200\n    registry.raise_for_status.return_value = None\n    registry.json.return_value = {\"info\": {\"project_urls\": {\"Source\": \"https://github.com/acme/demo\"}}}\n    release = Mock()\n    release.status_code = release_status\n    if release_status == 403:\n        response = httpx.Response(403, request=httpx.Request(\"GET\", \"https://api.github.com/example\"))\n        release.raise_for_status.side_effect = httpx.HTTPStatusError(\"forbidden\", request=response.request, response=response)\n    else:\n        release.raise_for_status.return_value = None\n    release.json.return_value = {\"body\": body}\n    client = Mock()\n    client.get.side_effect = [registry, release] if release_status != 404 else [registry, release, release]\n    monkeypatch.setattr(review.httpx, \"Client\", lambda **_kwargs: client)\n\n    records = review._release_context([{\"package\": \"demo\", \"ecosystem\": \"pypi\", \"head_version\": \"1.2.3\"}])\n\n    assert records[0][\"status\"] == expected\n    assert client.close.called\n    if expected == \"lookup_failed\":\n        assert \"HTTPStatusError\" in records[0][\"error\"]\n    if expected == \"retrieved\":\n        assert records[0][\"release_notes\"] == \"Release notes\"",
-          "line_end": 61,
-          "line_start": 31,
-          "path": "tests/test_dependabot_review.py",
+          "content": "@pytest.mark.parametrize((\"release_status\", \"body\", \"expected\"), [\n    (200, \"Release notes\", \"retrieved\"),\n    (200, \"\", \"no_release_notes\"),\n    (404, \"\", \"no_release_notes\"),\n    (403, \"\", \"lookup_failed\"),\n])\ndef test_release_lookup_status_is_explicit_and_machine_readable(monkeypatch, release_status, body, expected):\n    registry = Mock()\n    registry.status_code = 200\n    registry.raise_for_status.return_value = None\n    registry.json.return_value = {\"info\": {\"project_urls\": {\"Source\": \"https://github.com/acme/demo\"}}}\n    release = Mock()\n    release.status_code = release_status\n    if release_status == 403:\n        response = httpx.Response(403, request=httpx.Request(\"GET\", \"https://api.github.com/example\"))\n        release.raise_for_status.side_effect = httpx.HTTPStatusError(\"forbidden\", request=response.request, response=response)\n    else:\n        release.raise_for_status.return_value = None\n    release.json.return_value = {\"body\": body}\n    client = Mock()\n    client.get.side_effect = [registry, release] if release_status != 404 else [registry, release, release]\n    monkeypatch.setattr(release_notes.httpx, \"Client\", lambda **_kwargs: client)\n\n    records = review._release_context([{\"package\": \"demo\", \"ecosystem\": \"pypi\", \"head_version\": \"1.2.3\"}])\n\n    assert records[0][\"status\"] == expected\n    assert client.close.called\n    if expected == \"lookup_failed\":\n        assert \"HTTPStatusError\" in records[0][\"error\"]\n    if expected == \"retrieved\":\n        assert records[0][\"release_notes\"] == \"Release notes\"",
+          "line_end": 64,
+          "line_start": 34,
+          "path": "tests/test_dependabot_review_core.py",
           "rank": 1,
           "relevant": true,
           "symbol": "test_release_lookup_status_is_explicit_and_machine_readable"
         },
         {
           "content": "def test_comment_failure_includes_github_api_message():\n    endpoint = \"https://api.github.com/repos/acme/demo/issues/4/comments?per_page=100&page=1\"\n    response = review.httpx.Response(\n        403,\n        json={\"message\": \"Resource not accessible by integration\"},\n        request=review.httpx.Request(\"GET\", endpoint),\n    )\n    github = Mock()\n    github.get.return_value = response\n\n    with pytest.raises(RuntimeError, match=\"Resource not accessible by integration\"):\n        post_idempotent_review_comment(\n            {\"repository_full_name\": \"acme/demo\", \"pull_request\": {\"number\": 4}},\n            \"review body\",\n            github_client=github,\n        )",
-          "line_end": 312,
-          "line_start": 297,
-          "path": "tests/test_dependabot_review.py",
+          "line_end": 315,
+          "line_start": 300,
+          "path": "tests/test_dependabot_review_core.py",
           "rank": 2,
           "relevant": false,
           "symbol": "test_comment_failure_includes_github_api_message"
@@ -2266,9 +2257,9 @@
       "expected_relevant_locations": [
         {
           "evidence_classification": "semantic_context",
-          "path": "reporting.py",
-          "required_text": "_SECRET_FILE_SUFFIXES",
-          "symbol": "_is_sensitive_path"
+          "path": "vulnerability_agent/security.py",
+          "required_text": "SECRET_FILE_SUFFIXES",
+          "symbol": "is_sensitive_path"
         }
       ],
       "expected_source_evidence_classification": "semantic_context",
@@ -2309,11 +2300,11 @@
     "category_metrics": {
       "api_usage": {
         "case_count": 14,
-        "mrr": 1.0,
+        "mrr": 0.9428571428571428,
         "no_evidence_false_positive_results": 0,
-        "non_relevant_results_at_5": 44,
-        "precision_at_5": 0.3714285714285715,
-        "recall_at_5": 0.9642857142857142,
+        "non_relevant_results_at_5": 46,
+        "precision_at_5": 0.3428571428571429,
+        "recall_at_5": 0.9166666666666667,
         "with_relevant_source_evidence": 14,
         "without_relevant_source_evidence": 0
       },
@@ -2321,8 +2312,8 @@
         "case_count": 4,
         "mrr": 1.0,
         "no_evidence_false_positive_results": 0,
-        "non_relevant_results_at_5": 3,
-        "precision_at_5": 0.8500000000000001,
+        "non_relevant_results_at_5": 4,
+        "precision_at_5": 0.8,
         "recall_at_5": 0.8043478260869565,
         "with_relevant_source_evidence": 4,
         "without_relevant_source_evidence": 0
@@ -2349,12 +2340,12 @@
       }
     },
     "configuration_only_case_count": 0,
-    "mrr": 1.0,
+    "mrr": 0.9652173913043478,
     "no_evidence_false_positive_case_count": 0,
     "no_evidence_false_positive_results": 0,
-    "non_relevant_results_at_5": 60,
-    "precision_at_5": 0.4074074074074075,
-    "recall_at_5": 0.9442344045368621,
+    "non_relevant_results_at_5": 63,
+    "precision_at_5": 0.38518518518518524,
+    "recall_at_5": 0.9152488972904852,
     "scored_source_retrieval_case_count": 27,
     "source_retrieval_case_count": 28,
     "uncertain_case_count": 1,

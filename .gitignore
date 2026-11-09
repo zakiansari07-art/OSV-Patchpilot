@@ -20,3 +20,4 @@ saved report/*.json
 
 docs/*.md
 !docs/CODE_CLEANUP_AUDIT.md
+agent.md

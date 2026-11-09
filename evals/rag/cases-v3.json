@@ -35,8 +35,8 @@
       "expected_evidence_classification": "api_usage",
       "expected_relevant_locations": [
         {
-          "path": "vulnerability_agent/dependabot_review.py",
-          "symbol": "_release_context",
+          "path": "vulnerability_agent/dependabot/release_notes.py",
+          "symbol": "release_context",
           "required_text": "httpx.Client(timeout=8.0",
           "evidence_classification": "api_usage"
         }
@@ -107,139 +107,139 @@
       "expected_evidence_classification": "direct_import",
       "expected_relevant_locations": [
         {
-          "path": "vulnerability_agent/report_validation.py",
+          "path": "vulnerability_agent/validation/models.py",
           "symbol": "_ReportModel",
           "required_text": "class _ReportModel(BaseModel)",
           "evidence_classification": "direct_import"
         },
         {
-          "path": "vulnerability_agent/report_validation.py",
+          "path": "vulnerability_agent/validation/models.py",
           "symbol": "DependencyRecord",
           "required_text": "class DependencyRecord(_ReportModel)",
           "evidence_classification": "api_usage"
         },
         {
-          "path": "vulnerability_agent/report_validation.py",
+          "path": "vulnerability_agent/validation/models.py",
           "symbol": "DependencyUpdate",
           "required_text": "class DependencyUpdate(_ReportModel)",
           "evidence_classification": "api_usage"
         },
         {
-          "path": "vulnerability_agent/report_validation.py",
+          "path": "vulnerability_agent/validation/models.py",
           "symbol": "TestResult",
           "required_text": "class TestResult(_ReportModel)",
           "evidence_classification": "api_usage"
         },
         {
-          "path": "vulnerability_agent/report_validation.py",
+          "path": "vulnerability_agent/validation/models.py",
           "symbol": "ReportCounts",
           "required_text": "class ReportCounts(_ReportModel)",
           "evidence_classification": "api_usage"
         },
         {
-          "path": "vulnerability_agent/report_validation.py",
+          "path": "vulnerability_agent/validation/models.py",
           "symbol": "AffectedVersionAssessment",
           "required_text": "class AffectedVersionAssessment(_ReportModel)",
           "evidence_classification": "api_usage"
         },
         {
-          "path": "vulnerability_agent/report_validation.py",
+          "path": "vulnerability_agent/validation/models.py",
           "symbol": "AdvisoryRecord",
           "required_text": "class AdvisoryRecord(_ReportModel)",
           "evidence_classification": "api_usage"
         },
         {
-          "path": "vulnerability_agent/report_validation.py",
+          "path": "vulnerability_agent/validation/models.py",
           "symbol": "FindingGroup",
           "required_text": "class FindingGroup(_ReportModel)",
           "evidence_classification": "api_usage"
         },
         {
-          "path": "vulnerability_agent/report_validation.py",
+          "path": "vulnerability_agent/validation/models.py",
           "symbol": "SecurityDelta",
           "required_text": "class SecurityDelta(_ReportModel)",
           "evidence_classification": "api_usage"
         },
         {
-          "path": "vulnerability_agent/report_validation.py",
+          "path": "vulnerability_agent/validation/models.py",
           "symbol": "ScanSummary",
           "required_text": "class ScanSummary(_ReportModel)",
           "evidence_classification": "api_usage"
         },
         {
-          "path": "vulnerability_agent/report_validation.py",
+          "path": "vulnerability_agent/validation/models.py",
           "symbol": "ReleaseContextRecord",
           "required_text": "class ReleaseContextRecord(_ReportModel)",
           "evidence_classification": "api_usage"
         },
         {
-          "path": "vulnerability_agent/report_validation.py",
+          "path": "vulnerability_agent/validation/models.py",
           "symbol": "DependencyAnalysis",
           "required_text": "class DependencyAnalysis(_ReportModel)",
           "evidence_classification": "api_usage"
         },
         {
-          "path": "vulnerability_agent/report_validation.py",
+          "path": "vulnerability_agent/validation/models.py",
           "symbol": "SourceLocation",
           "required_text": "class SourceLocation(_ReportModel)",
           "evidence_classification": "api_usage"
         },
         {
-          "path": "vulnerability_agent/report_validation.py",
+          "path": "vulnerability_agent/validation/models.py",
           "symbol": "VulnerabilityReachability",
           "required_text": "class VulnerabilityReachability(_ReportModel)",
           "evidence_classification": "api_usage"
         },
         {
-          "path": "vulnerability_agent/report_validation.py",
+          "path": "vulnerability_agent/validation/models.py",
           "symbol": "SourceUsageRecord",
           "required_text": "class SourceUsageRecord(_ReportModel)",
           "evidence_classification": "api_usage"
         },
         {
-          "path": "vulnerability_agent/report_validation.py",
+          "path": "vulnerability_agent/validation/models.py",
           "symbol": "SourceUsageSummary",
           "required_text": "class SourceUsageSummary(_ReportModel)",
           "evidence_classification": "api_usage"
         },
         {
-          "path": "vulnerability_agent/report_validation.py",
+          "path": "vulnerability_agent/validation/models.py",
           "symbol": "TestComparison",
           "required_text": "class TestComparison(_ReportModel)",
           "evidence_classification": "api_usage"
         },
         {
-          "path": "vulnerability_agent/report_validation.py",
+          "path": "vulnerability_agent/validation/models.py",
           "symbol": "ValidationRecord",
           "required_text": "class ValidationRecord(_ReportModel)",
           "evidence_classification": "api_usage"
         },
         {
-          "path": "vulnerability_agent/report_validation.py",
+          "path": "vulnerability_agent/validation/models.py",
           "symbol": "TestSummary",
           "required_text": "class TestSummary(_ReportModel)",
           "evidence_classification": "api_usage"
         },
         {
-          "path": "vulnerability_agent/report_validation.py",
+          "path": "vulnerability_agent/validation/models.py",
           "symbol": "ReportSummary",
           "required_text": "class ReportSummary(_ReportModel)",
           "evidence_classification": "api_usage"
         },
         {
-          "path": "vulnerability_agent/report_validation.py",
+          "path": "vulnerability_agent/validation/models.py",
           "symbol": "EvidenceReportV6",
           "required_text": "class EvidenceReportV6(_ReportModel)",
           "evidence_classification": "api_usage"
         },
         {
-          "path": "vulnerability_agent/report_validation.py",
+          "path": "vulnerability_agent/validation/validator.py",
           "symbol": "validate_evidence_report",
           "required_text": "EvidenceReportV6.model_validate(normalized)",
           "evidence_classification": "api_usage"
         },
         {
-          "path": "vulnerability_agent/report_validation.py",
+          "path": "vulnerability_agent/validation/validator.py",
           "symbol": "evidence_report_json_schema",
           "required_text": "return EvidenceReportV6.model_json_schema()",
           "evidence_classification": "api_usage"
@@ -266,7 +266,7 @@
         },
         {
           "path": "main.py",
-          "symbol": "main",
+          "symbol": "_run_review",
           "required_text": "review_graph.invoke(initial_state)",
           "evidence_classification": "api_usage"
         }
@@ -331,31 +331,31 @@
       "expected_evidence_classification": "api_usage",
       "expected_relevant_locations": [
         {
-          "path": "vulnerability_agent/retrieval.py",
+          "path": "vulnerability_agent/retrieval/index.py",
           "symbol": "LocalCodeRetriever.__init__",
           "required_text": "from qdrant_client import QdrantClient",
           "evidence_classification": "api_usage"
         },
         {
-          "path": "vulnerability_agent/retrieval.py",
+          "path": "vulnerability_agent/retrieval/index.py",
           "symbol": "LocalCodeRetriever.index_sources",
           "required_text": "PointStruct(id=document[\"id\"], vector=vector, payload=document)",
           "evidence_classification": "api_usage"
         },
         {
-          "path": "vulnerability_agent/retrieval.py",
+          "path": "vulnerability_agent/retrieval/index.py",
           "symbol": "LocalCodeRetriever._repo_filter",
           "required_text": "from qdrant_client.models import FieldCondition, Filter, MatchValue",
           "evidence_classification": "api_usage"
         },
         {
-          "path": "vulnerability_agent/retrieval.py",
+          "path": "vulnerability_agent/retrieval/index.py",
           "symbol": "LocalCodeRetriever._load_documents",
           "required_text": "self.client.scroll(",
           "evidence_classification": "api_usage"
         },
         {
-          "path": "vulnerability_agent/retrieval.py",
+          "path": "vulnerability_agent/retrieval/index.py",
           "symbol": "LocalCodeRetriever.retrieve",
           "required_text": "self.client.query_points(",
           "evidence_classification": "api_usage"
@@ -381,7 +381,7 @@
       "expected_evidence_classification": "api_usage",
       "expected_relevant_locations": [
         {
-          "path": "vulnerability_agent/retrieval.py",
+          "path": "vulnerability_agent/retrieval/index.py",
           "symbol": "LocalCodeRetriever.__init__",
           "required_text": "from fastembed import TextEmbedding",
           "evidence_classification": "api_usage"
@@ -401,7 +401,7 @@
       "expected_evidence_classification": "api_usage",
       "expected_relevant_locations": [
         {
-          "path": "vulnerability_agent/retrieval.py",
+          "path": "vulnerability_agent/retrieval/chunking.py",
           "symbol": "_tree_sitter_chunks",
           "required_text": "get_parser(language)",
           "evidence_classification": "api_usage"
@@ -447,14 +447,8 @@
           "evidence_classification": "direct_import"
         },
         {
-          "path": "vulnerability_agent/dependabot_review.py",
-          "symbol": "_direct_dependency_names",
-          "required_text": "import tomli as tomllib",
-          "evidence_classification": "direct_import"
-        },
-        {
-          "path": "vulnerability_agent/dependabot_review.py",
-          "symbol": "_dependency_index",
+          "path": "vulnerability_agent/dependabot/inventory.py",
+          "symbol": "_load_toml",
           "required_text": "import tomli as tomllib",
           "evidence_classification": "direct_import"
         },
@@ -543,7 +537,7 @@
       "expected_evidence_classification": "test_only",
       "expected_relevant_locations": [
         {
-          "path": "tests/test_dependabot_review.py",
+          "path": "tests/test_dependabot_review_core.py",
           "symbol": "test_release_lookup_status_is_explicit_and_machine_readable",
           "required_text": "httpx.Response(403",
           "evidence_classification": "test_only"
@@ -840,9 +834,9 @@
       "uncertain": true,
       "expected_relevant_locations": [
         {
-          "path": "reporting.py",
-          "symbol": "_is_sensitive_path",
-          "required_text": "_SECRET_FILE_SUFFIXES",
+          "path": "vulnerability_agent/security.py",
+          "symbol": "is_sensitive_path",
+          "required_text": "SECRET_FILE_SUFFIXES",
           "evidence_classification": "semantic_context"
         }
       ],

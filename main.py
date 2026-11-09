@@ -99,7 +99,7 @@ def _validate_comment_identity(args: argparse.Namespace, report: dict[str, Any])
         raise ValueError("Evidence report does not match the expected Dependabot PR identity")
 
 
-def main(argv: Sequence[str] | None = None) -> int:
+def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Collect or analyze evidence for a Dependabot pull request review.")
     parser.add_argument("repo", nargs="?", type=Path,
                         help="Path to a local clone (required with --review-pr)")
@@ -123,14 +123,17 @@ def main(argv: Sequence[str] | None = None) -> int:
                         help="Expected GitHub repository for validating a report before comment posting")
     parser.add_argument("--expected-head-sha", metavar="SHA",
                         help="Expected PR head commit for validating a report before comment posting")
-    args = parser.parse_args(argv)
-    load_dotenv()
+    return parser
 
+
+def _tracing_enabled(parser: argparse.ArgumentParser) -> bool:
     tracing_enabled = os.getenv("LANGSMITH_TRACING", "false").strip().lower() in {"1", "true", "yes", "on"}
     if tracing_enabled and not os.getenv("LANGSMITH_API_KEY"):
         parser.error("LANGSMITH_TRACING is enabled but LANGSMITH_API_KEY is missing")
+    return tracing_enabled
 
-    repo = args.repo.expanduser().resolve() if args.repo else None
+
+def _validate_args(parser: argparse.ArgumentParser, args: argparse.Namespace, repo: Path | None) -> None:
     if not args.review_pr and not args.analyze_report:
         parser.error("Specify --review-pr or --analyze-report")
     if args.post_comment and not (args.review_pr or args.analyze_report):
@@ -148,21 +151,25 @@ def main(argv: Sequence[str] | None = None) -> int:
     if repo is not None and (not repo.is_dir() or not (repo / ".git").exists()):
         parser.error(f"Not a Git working tree: {repo}")
 
-    if args.analyze_report:
-        try:
-            precollected_report = json.loads(args.analyze_report.expanduser().read_text(encoding="utf-8"))
-            if not isinstance(precollected_report, dict) or precollected_report.get("mode") != "dependabot_pr_review":
-                raise ValueError("The report is not a Dependabot PR review artifact")
-            if args.report_artifact_url:
-                _validate_artifact_url(args.report_artifact_url, precollected_report)
-                precollected_report["report_artifact_url"] = args.report_artifact_url
-            if args.post_comment:
-                _validate_comment_identity(args, precollected_report)
-        except (OSError, json.JSONDecodeError, ValueError) as exc:
-            parser.error(f"Could not read Dependabot evidence report: {exc}")
-    else:
-        precollected_report = None
 
+def _load_precollected_report(parser: argparse.ArgumentParser, args: argparse.Namespace) -> dict[str, Any] | None:
+    if not args.analyze_report:
+        return None
+    try:
+        report = json.loads(args.analyze_report.expanduser().read_text(encoding="utf-8"))
+        if not isinstance(report, dict) or report.get("mode") != "dependabot_pr_review":
+            raise ValueError("The report is not a Dependabot PR review artifact")
+        if args.report_artifact_url:
+            _validate_artifact_url(args.report_artifact_url, report)
+            report["report_artifact_url"] = args.report_artifact_url
+        if args.post_comment:
+            _validate_comment_identity(args, report)
+        return report
+    except (OSError, json.JSONDecodeError, ValueError) as exc:
+        parser.error(f"Could not read Dependabot evidence report: {exc}")
+
+
+def _make_usage_analyzer(args: argparse.Namespace):
     def analyze_usage(head_repository: Path, findings: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """Reuse report-only hybrid RAG on the exact PR snapshot."""
         if not findings:
@@ -183,23 +190,44 @@ def main(argv: Sequence[str] | None = None) -> int:
             analyses.extend(result.get("usage_analysis", []))
         return analyses
 
+    return analyze_usage
+
+
+def _run_review(
+    args: argparse.Namespace,
+    repo: Path | None,
+    precollected_report: dict[str, Any] | None,
+    analyze_usage: Any,
+) -> dict[str, Any]:
+    review_graph = build_dependabot_review_graph(usage_analyzer=analyze_usage)
+    initial_state: dict[str, Any] = {
+        "post_comment": args.post_comment,
+        "collect_only": args.collect_only,
+    }
+    if precollected_report is not None:
+        initial_state["report"] = precollected_report
+    else:
+        initial_state.update({"repository": str(repo), "pull_request": args.review_pr})
+    return review_graph.invoke(initial_state).get("report", {})
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    parser = _build_parser()
+    args = parser.parse_args(argv)
+    load_dotenv()
+    tracing_enabled = _tracing_enabled(parser)
+    repo = args.repo.expanduser().resolve() if args.repo else None
+    _validate_args(parser, args, repo)
+    precollected_report = _load_precollected_report(parser, args)
+    analyze_usage = _make_usage_analyzer(args)
+
     started_at = datetime.now(timezone.utc)
     automatic_report_path = DEFAULT_REPORT_DIRECTORY / (
         f"review-{started_at.strftime('%Y%m%dT%H%M%S.%fZ')}-{uuid.uuid4().hex[:8]}.json"
     )
     requested_report_path = args.report.expanduser().resolve() if args.report else None
     try:
-        review_graph = build_dependabot_review_graph(usage_analyzer=analyze_usage)
-        initial_state: dict[str, Any] = {
-            "post_comment": args.post_comment,
-            "collect_only": args.collect_only,
-        }
-        if precollected_report is not None:
-            initial_state["report"] = precollected_report
-        else:
-            initial_state.update({"repository": str(repo), "pull_request": args.review_pr})
-        review_state = review_graph.invoke(initial_state)
-        report = review_state.get("report", {})
+        report = _run_review(args, repo, precollected_report, analyze_usage)
     except Exception as exc:
         report = {
             "schema_version": 3, "mode": "dependabot_pr_review", "status": "review_failed",
@@ -207,7 +235,6 @@ def main(argv: Sequence[str] | None = None) -> int:
             "error": f"{type(exc).__name__}: {exc}",
             "note": "Review-only workflow; no push, PR creation, merge, or comment was attempted.",
         }
-
     report["observability"] = {
         "langsmith_tracing": "enabled" if tracing_enabled else "disabled",
         "langsmith_project": os.getenv("LANGSMITH_PROJECT", "default") if tracing_enabled else "",

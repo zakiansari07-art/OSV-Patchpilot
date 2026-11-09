@@ -61,6 +61,57 @@ def _semver_key(value: str, *, allow_v: bool = False) -> tuple[int, int, int, tu
     return int(major), int(minor), int(patch), prerelease_key
 
 
+def _range_contains_version(
+    version_range: dict[str, Any], version: str, ecosystem: str, advisory_id: str,
+) -> bool:
+    """Evaluate one OSV range, raising on unsupported or malformed evidence."""
+    range_type = str(version_range.get("type", "")).upper()
+    if range_type not in {"ECOSYSTEM", "SEMVER"}:
+        raise ValueError(f"OSV advisory {advisory_id} uses unsupported range type {range_type!r}")
+    events = version_range.get("events")
+    if not isinstance(events, list) or not events:
+        raise ValueError(f"OSV advisory {advisory_id} has an empty or invalid version range")
+    compare = _semver_key if range_type == "SEMVER" else lambda value: _version_key(value, ecosystem)
+    range_candidate = compare(version)
+    start: Any | None = None
+    active = False
+    for event in events:
+        if not isinstance(event, dict) or len(event) != 1:
+            raise ValueError(f"OSV advisory {advisory_id} has an invalid range event")
+        kind, raw_boundary = next(iter(event.items()))
+        if kind == "introduced":
+            if active:
+                raise ValueError(f"OSV advisory {advisory_id} has overlapping range events")
+            start = compare(str(raw_boundary))
+            active = True
+            continue
+        if kind not in {"fixed", "last_affected", "limit"}:
+            raise ValueError(f"OSV advisory {advisory_id} contains unsupported range event {kind!r}")
+        if not active or start is None:
+            raise ValueError(f"OSV advisory {advisory_id} has a closing event without an introduced event")
+        if kind == "limit" and raw_boundary == "*":  # OSV's special infinity limit.
+            matched = start <= range_candidate
+        elif kind == "fixed":
+            boundary = compare(str(raw_boundary))
+            if start >= boundary:
+                raise ValueError(f"OSV advisory {advisory_id} has an invalid fixed boundary")
+            matched = start <= range_candidate < boundary
+        elif kind == "last_affected":
+            boundary = compare(str(raw_boundary))
+            if start > boundary:
+                raise ValueError(f"OSV advisory {advisory_id} has an invalid last_affected boundary")
+            matched = start <= range_candidate <= boundary
+        else:  # OSV limit is the exclusive end of the current interval.
+            boundary = compare(str(raw_boundary))
+            if start >= boundary:
+                raise ValueError(f"OSV advisory {advisory_id} has an invalid limit boundary")
+            matched = start <= range_candidate < boundary
+        if matched:
+            return True
+        active, start = False, None
+    return bool(active and start is not None and start <= range_candidate)
+
+
 def is_version_affected_by_advisory(
     finding: dict[str, Any], version: str,
 ) -> bool:
@@ -79,53 +130,7 @@ def is_version_affected_by_advisory(
 
     has_verifiable_data = False
     unknown_reasons: list[str] = []
-
-    def range_contains(version_range: dict[str, Any]) -> bool:
-        range_type = str(version_range.get("type", "")).upper()
-        if range_type not in {"ECOSYSTEM", "SEMVER"}:
-            raise ValueError(f"OSV advisory {finding.get('id', '')} uses unsupported range type {range_type!r}")
-        events = version_range.get("events")
-        if not isinstance(events, list) or not events:
-            raise ValueError(f"OSV advisory {finding.get('id', '')} has an empty or invalid version range")
-        compare = _semver_key if range_type == "SEMVER" else lambda value: _version_key(value, ecosystem)
-        range_candidate = compare(version)
-        start: Any | None = None
-        active = False
-        for event in events:
-            if not isinstance(event, dict) or len(event) != 1:
-                raise ValueError(f"OSV advisory {finding.get('id', '')} has an invalid range event")
-            kind, raw_boundary = next(iter(event.items()))
-            if kind == "introduced":
-                if active:
-                    raise ValueError(f"OSV advisory {finding.get('id', '')} has overlapping range events")
-                start = compare(str(raw_boundary))
-                active = True
-                continue
-            if kind not in {"fixed", "last_affected", "limit"}:
-                raise ValueError(f"OSV advisory {finding.get('id', '')} contains unsupported range event {kind!r}")
-            if not active or start is None:
-                raise ValueError(f"OSV advisory {finding.get('id', '')} has a closing event without an introduced event")
-            if kind == "limit" and raw_boundary == "*":  # OSV's special infinity limit.
-                matched = start <= range_candidate
-            elif kind == "fixed":
-                boundary = compare(str(raw_boundary))
-                if start >= boundary:
-                    raise ValueError(f"OSV advisory {finding.get('id', '')} has an invalid fixed boundary")
-                matched = start <= range_candidate < boundary
-            elif kind == "last_affected":
-                boundary = compare(str(raw_boundary))
-                if start > boundary:
-                    raise ValueError(f"OSV advisory {finding.get('id', '')} has an invalid last_affected boundary")
-                matched = start <= range_candidate <= boundary
-            else:  # OSV limit is the exclusive end of the current interval.
-                boundary = compare(str(raw_boundary))
-                if start >= boundary:
-                    raise ValueError(f"OSV advisory {finding.get('id', '')} has an invalid limit boundary")
-                matched = start <= range_candidate < boundary
-            if matched:
-                return True
-            active, start = False, None
-        return bool(active and start is not None and start <= range_candidate)
+    advisory_id = str(finding.get("id", ""))
 
     for affected in matching_entries:
         versions = affected.get("versions") or []
@@ -140,7 +145,7 @@ def is_version_affected_by_advisory(
         for version_range in affected.get("ranges", []):
             has_verifiable_data = True
             try:
-                if range_contains(version_range):
+                if _range_contains_version(version_range, version, ecosystem, advisory_id):
                     return True
             except (ValueError, TypeError, KeyError) as exc:
                 unknown_reasons.append(str(exc))
