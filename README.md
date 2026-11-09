@@ -83,8 +83,6 @@ The evidence job in [`examples/github-actions/`](examples/github-actions/) compl
 
 Model-backed reviews are instrumented with **LangSmith**. When `LANGSMITH_TRACING=true`, each run records the LangGraph execution, per-node latency, the model call, and the optional comment step, so slow reviews and model failures can be diagnosed without re-running the workflow. Tracing is opt-in because traces can include prompts and repository-derived text; enable it only in a workspace approved for that data.
 
-> **Placeholder:** replace this image with a sanitized capture of a real trace at `docs/assets/langsmith-review-trace.png`.
-
 ## Engineering highlights
 
 ### 1. Deterministic security decisions, LLM narrative second
