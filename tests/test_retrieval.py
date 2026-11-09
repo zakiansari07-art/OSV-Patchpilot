@@ -295,6 +295,66 @@ class FakeEmbedder:
             yield vector
 
 
+class CountingEmbedder(FakeEmbedder):
+    """Record embed batches so tests can assert bounded work."""
+
+    def __init__(self):
+        self.batches: list[list[str]] = []
+
+    def embed(self, texts):
+        batch = list(texts)
+        self.batches.append(batch)
+        yield from super().embed(batch)
+
+
+class CountingClient:
+    """Count dense-query and upsert calls without changing client behavior."""
+
+    def __init__(self, client):
+        self._client = client
+        self.query_points_calls = 0
+        self.upsert_calls = 0
+
+    def __getattr__(self, name):
+        return getattr(self._client, name)
+
+    def query_points(self, *args, **kwargs):
+        self.query_points_calls += 1
+        return self._client.query_points(*args, **kwargs)
+
+    def upsert(self, *args, **kwargs):
+        self.upsert_calls += 1
+        return self._client.upsert(*args, **kwargs)
+
+
+def test_retrieval_embeds_the_query_once_and_issues_one_dense_query(tmp_path):
+    """Bound retrieval work by call count instead of wall-clock timing."""
+    pytest.importorskip("qdrant_client")
+    from qdrant_client import QdrantClient
+
+    repository = tmp_path / "demo-repo"
+    repository.mkdir()
+    storage = tmp_path / "qdrant"
+    sources = {
+        "src/client.py": "import requests\ndef fetch_data(url):\n    return requests.get(url)\n",
+        "tests/test_client.py": "def test_fetch():\n    assert True\n",
+    }
+    embedder = CountingEmbedder()
+    client = CountingClient(QdrantClient(path=str(storage)))
+    retriever = LocalCodeRetriever(storage, client=client, embedder=embedder)
+    retriever.index_sources(repository, sources)
+    embedder.batches.clear()
+    client.query_points_calls = 0
+    client.upsert_calls = 0
+
+    retriever.retrieve(repository, "requests fetch_data", limit=3)
+    retriever.client.close()
+
+    assert embedder.batches == [["requests fetch_data"]]
+    assert client.query_points_calls == 1
+    assert client.upsert_calls == 0
+
+
 def test_qdrant_local_index_searches_and_reloads_persisted_chunks(tmp_path):
     pytest.importorskip("qdrant_client")
     repository = tmp_path / "demo-repo"

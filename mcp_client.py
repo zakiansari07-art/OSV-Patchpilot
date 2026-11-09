@@ -4,7 +4,6 @@ from __future__ import annotations
 import json
 import logging
 import os
-import re
 import sqlite3
 import time
 from contextlib import AsyncExitStack, closing
@@ -15,6 +14,7 @@ from typing import Any
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 from async_utils import run_async
+from vulnerability_agent.security import is_sensitive_path
 
 logger = logging.getLogger(__name__)
 
@@ -137,12 +137,7 @@ class MCPPolicyProxy:
         if resolved == root and not allow_root:
             raise MCPPolicyError("Filesystem MCP file operations must target a file inside the repository")
         relative = resolved.relative_to(root).as_posix() if resolved != root else "."
-        parts = {part.lower() for part in Path(relative).parts}
-        name = Path(relative).name.lower()
-        secret_name = re.compile(r"(?i)(?:^|[._-])(?:credentials?|secrets?|tokens?|passwords?|private[_-]?keys?|api[_-]?keys?)(?:[._-]|$)")
-        if (parts & {".env", ".npmrc", ".pypirc", "credentials", "secrets", "id_rsa", "id_ed25519"}
-                or name.startswith(".env") or Path(name).suffix in {".pem", ".key", ".p12", ".pfx", ".keystore"}
-                or any(secret_name.search(part) for part in parts)):
+        if is_sensitive_path(relative):
             raise MCPPolicyError("Filesystem MCP access to likely secret files is blocked")
         return relative
 
