@@ -77,6 +77,14 @@ Every review is archived as a schema-v6 report. Validation is more than “the J
 
 The evidence job in [`examples/github-actions/`](examples/github-actions/) completes dependency installation, tests, OSV scans, and source retrieval without any model credential. The companion comment job is the only place a model key is used.
 
+### LangSmith trace
+
+![LangSmith trace for a model-backed review](docs/assets/langsmith-review-trace.png)
+
+Model-backed reviews are instrumented with **LangSmith**. When `LANGSMITH_TRACING=true`, each run records the LangGraph execution, per-node latency, the model call, and the optional comment step, so slow reviews and model failures can be diagnosed without re-running the workflow. Tracing is opt-in because traces can include prompts and repository-derived text; enable it only in a workspace approved for that data.
+
+> **Placeholder:** replace this image with a sanitized capture of a real trace at `docs/assets/langsmith-review-trace.png`.
+
 ## Engineering highlights
 
 ### 1. Deterministic security decisions, LLM narrative second
@@ -152,6 +160,10 @@ The codebase was split from monoliths into cohesive packages while keeping compa
 - `vulnerability_agent/workflow/` — comment layout, formatting, verdicts, AI sanitization
 
 [`tests/test_architecture.py`](tests/test_architecture.py) enforces **500-line files** and **80-line functions** with empty allowlists. The cleanup audit is in [`docs/CODE_CLEANUP_AUDIT.md`](docs/CODE_CLEANUP_AUDIT.md).
+
+### 7. Optional observability with LangSmith
+
+`main.py` records whether tracing is enabled and which LangSmith project is active in every report. With `LANGSMITH_TRACING=true`, LangGraph runs are traced end-to-end: graph nodes, latency, the model call, and the optional comment step. That makes model failures and slow reviews diagnosable without touching the deterministic evidence path. Tracing stays opt-in because traces can contain repository-derived text.
 
 ## Verification
 
