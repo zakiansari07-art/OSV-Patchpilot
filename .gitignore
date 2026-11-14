@@ -17,7 +17,12 @@ run-report.json
 saved report/*.json
 !saved report/.gitkeep
 
+<<<<<<< HEAD
 
 docs/*.md
 !docs/CODE_CLEANUP_AUDIT.md
 agent.md
+=======
+.vscode/
+docs/*.md
+>>>>>>> c112938 (added .vscode to gitignore)
